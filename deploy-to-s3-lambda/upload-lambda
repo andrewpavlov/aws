@@ -1,0 +1,39 @@
+#!/bin/bash -ex
+#
+# Build AWS Lambda function ZIP file and upload to S3
+#
+# Usage: ./upload-lambda S3BUCKET S3KEY
+#
+
+s3bucket=${1:?Specify target S3 bucket name}
+s3key=${2:?Specify target S3 key}
+awsProfile=${3:?Specify AWS profile}
+awsRegion=${4:?Specify AWS region}
+target=s3://$s3bucket/$s3key
+
+tmpdir=$(mktemp -d /tmp/lambda-XXXXXX)
+zipfile=$tmpdir/lambda.zip
+virtualenv=$tmpdir/virtual-env
+(
+  virtualenv $virtualenv
+  source $virtualenv/bin/activate
+  pip install awscli
+)
+
+# "aws" command (fixing shabang line)
+rsync -va $virtualenv/bin/aws $tmpdir/aws
+perl -pi -e '$_ ="#!/usr/bin/python\n" if $. == 1' $tmpdir/aws
+(cd $tmpdir; zip -r9 $zipfile aws)
+
+# aws-cli package requirements
+(cd $virtualenv/lib/python2.7/site-packages && zip -r9 $zipfile *)
+
+# AWS Lambda function (with the right name)
+rsync -va lambda.py $tmpdir/index.py
+(cd $tmpdir; zip -r9 $zipfile index.py)
+
+# Upload to S3
+aws s3 cp --acl=public-read $zipfile $target --profile $awsProfile --region $awsRegion
+
+# Clean up
+rm -rf $tmpdir
