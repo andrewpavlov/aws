@@ -5,30 +5,21 @@ Parameters:
   Project:
     Description: Project name
     Type: String
-  Configuration:
-    Description: EC2 parameters store value name
-    Type: String
   KeyPair:
     Description: Key pair for access to EC2 by SSH
     Type: String
 
 Resources:
-  LC:
+  UbuntuNode:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       ImageId: ami-da05a4a0
       IamInstanceProfile:
         Fn::ImportValue:
-          !Join
-            - ""
-            - - !Ref Project
-              - "-ec2-res-ip"
+          !Sub ${Project}-ec2-res-ip
       SecurityGroups:
         - Fn::ImportValue:
-            !Join
-              - ""
-              - - !Ref Project
-                - "-ec2-res-sg"
+            !Sub ${Project}-ec2-res-sg
       InstanceType: t2.micro
       KeyName: 
         Ref: KeyPair
@@ -43,22 +34,30 @@ Resources:
           apt-get install -y -qq nodejs
           npm install -g db-migrate db-migrate-mysql
 
-          apt-get install -y jq awscli
+          apt-get install -y jq
           apt-get install -y libcairo2-dev libjpeg8-dev libpango1.0-dev libgif-dev
 
-          apt-get install default-jre
+          apt-get install -y default-jre
+
+          apt-get install -y python2.7 python-pip
+          pip install --upgrade awscli
+          aws --version
 
           # Load parameters
-          value=`aws ssm get-parameter --name ${Configuration} --query "Parameter.Value" --output text`
+          echo "Load parameters..."
+          value=`aws ssm get-parameter --name ${AWS::StackName} --query "Parameter.Value" --output text --region ${AWS::Region}`
           IFS=$'\n'; pairs=($value); unset IFS;
           for i in "${!pairs[@]}"; do
             IFS=$'='; kv=($i); unset IFS;
             k=${!kv[0]}
             v=`node -pe "'$i'.replace(/[^=]+=/, '')"`
+            echo $k="$v"
             declare $k="$v"
           done
+          echo "...done"
 
-          # Route 53
+          # Route53
+          echo "Configure Route53"
           if [[ ! -z "$Domain"  &&  ! -z "$SubDomain" ]]; then
             HostedZoneId=$(aws route53 list-hosted-zones | jq -r --arg name $Domain. '.HostedZones[] | select(.Name == $name and .Config.PrivateZone == false) | .Id | ltrimstr("/hostedzone/")')
             PublicIpAddr=$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)
@@ -87,6 +86,7 @@ Resources:
           fi
 
           # My SQL
+          echo "Configure MySQL"
           if [[ ! -z "$MyPassword" ]]; then
             add-apt-repository 'deb http://archive.ubuntu.com/ubuntu trusty universe'
             apt-get update -y
@@ -104,6 +104,7 @@ Resources:
             fi
 
             if [[ ! -z "$FromHost" ]]; then
+              echo "...Migrate"
               WronConf=""
               if [[ -z "$FromPort" ]]; then
                 FromPort=3306
@@ -146,28 +147,34 @@ Resources:
           fi
 
           # Web service
-          mkdir -p /var/www/$SiteDir/
+          echo "Configure Web service - $SiteDir;$ServiceCmd"
+          if [[ ! -z "$SiteDir" ]]; then
+            mkdir -p /var/www/$SiteDir/
 
-          echo "[Unit]
-          Description=${Project} web service
-          After=network.target
+            if [[ ! -z "$ServiceCmd" ]]; then
+              echo "[Unit]
+              Description=${Project} web service
+              After=network.target
 
-          [Service]
-          Type=simple
-          User=root
-          KillSignal=SIGQUIT
-          ExecStart=/bin/bash -ce \"exec /usr/bin/node /var/www/$SiteDir/$ServiceCmd >> /var/log/${Project}-service.log 2>&1\"
-          StandardOutput=syslog
-          StandardError=syslog
-          SyslogIdentifier=${Project}
-          Restart=always
+              [Service]
+              Type=simple
+              User=root
+              KillSignal=SIGQUIT
+              ExecStart=/bin/bash -ce \"exec /usr/bin/node /var/www/$SiteDir/$ServiceCmd >> /var/log/${Project}-service.log 2>&1\"
+              StandardOutput=syslog
+              StandardError=syslog
+              SyslogIdentifier=${Project}
+              Restart=always
 
-          [Install]
-          WantedBy=multi-user.target" > /etc/systemd/system/${Project}.service
+              [Install]
+              WantedBy=multi-user.target" > /etc/systemd/system/${Project}.service
 
-          systemctl enable ${Project}
+              systemctl enable ${Project}
+            fi
+          fi
 
           # Efs
+          echo "Setup EFS - $EfsId"
           if [[ ! -z "$EfsId" ]]; then
             apt-get install -y nfs-common 
             mkdir -p /mnt/efs
@@ -179,6 +186,7 @@ Resources:
           fi
 
           # CloudWatch
+          echo "Setup CloudWatch"
           curl https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py -O
           echo "[general]
           state_file = /var/awslogs/state/agent-state
@@ -191,9 +199,10 @@ Resources:
           initial_position = start_of_file
           log_group_name = ${Project}
           " > awslogs.conf
-          python ./awslogs-agent-setup.py --region=us-east-1 -n --configfile=awslogs.conf
+          python ./awslogs-agent-setup.py --region=${AWS::Region} -n --configfile=awslogs.conf
 
           # CodeDeploy
+          echo "Setup CodeDeploy"
           mkdir -p /tmp/aws.codedeploy/
           cd /tmp/aws.codedeploy/
           wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
@@ -202,7 +211,7 @@ Resources:
           service codedeploy-agent start
 
 Outputs:
-  LC:
-    Value: !Ref LC
+  UbuntuNode:
+    Value: !Ref UbuntuNode
     Export:
-      Name: !Sub ${Project}-lc
+      Name: !Sub ${AWS::StackName}

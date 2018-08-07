@@ -11,36 +11,46 @@ Set of stacks for web application based on
 * Database:
     - MySQL
 
+## Set properties
+
+```
+export AWS_PROFILE=my-account-name
+export AWS_REGION=us-east-1
+export PROJECT_NAME=my-project
+export EC2_KEYPAIR=refigure.dev
+```
+
 ## Create EC2 resources (like security group)
 
 ```sh
 aws cloudformation create-stack \
---stack-name refigure-ec2-res \
+--stack-name $PROJECT_NAME-ec2-res \
 --template-body file://nodejs-web-app-starter/ec2-res.yml \
 --capabilities CAPABILITY_NAMED_IAM \
 --parameters \
-ParameterKey=Project,ParameterValue=refigure \
---profile refigure.dev \
---region us-east-1
+ParameterKey=Project,ParameterValue=$PROJECT_NAME \
+--profile $AWS_PROFILE \
+--region $AWS_REGION
 ```
 
-## Create Launch Configuration
+## Create Launch Configuration (dev/qa/prod)
 
 ```sh
-aws cloudformation create-stack \
---stack-name refigure-lc \
---template-body file://nodejs-web-app-starter/lc.yml \
---capabilities CAPABILITY_NAMED_IAM \
---parameters \
-ParameterKey=Project,ParameterValue=refigure \
-ParameterKey=Configuration,ParameterValue=refigure.dev \
-ParameterKey=KeyPair,ParameterValue=refigure.dev \
---profile refigure.dev \
---region us-east-1
+for stage in "dev" "qa" "prod"; do \
+    aws cloudformation create-stack \
+    --stack-name $PROJECT_NAME-$stage-lc \
+    --template-body file://nodejs-web-app-starter/lc.yml \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameters \
+    ParameterKey=Project,ParameterValue=$PROJECT_NAME \
+    ParameterKey=KeyPair,ParameterValue=$EC2_KEYPAIR \
+    --profile $AWS_PROFILE \
+    --region $AWS_REGION \
+done
 ```
 
-Where
-* Configuration - EC2 oparameters store value name with runtime launch configuration
+Where:
+* KeyPair - EC Key Pair for SSH access
 
 ### Launch configuration run-time parameters
 
@@ -66,3 +76,19 @@ Create "String" value and add any parameters
     * EFS
         * EfsId - EFS Id (will be mounted as /mnt/efs/)
         * EfsPath - Will be linked to /files
+
+
+## Create EC2 (dev/qa/prod)
+
+```sh
+for stage in "dev" "qa" "prod"; do \
+    aws cloudformation create-stack \
+    --stack-name $PROJECT_NAME-$stage \
+    --template-body file://nodejs-web-app-starter/as.yml \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameters \
+    'ParameterKey=ASOptions,ParameterValue="1,1,1"' \
+    --profile $AWS_PROFILE \
+    --region $AWS_REGION \ 
+done
+```

@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Web service
+
+Parameters:
+  ASOptions:
+    Description: Auto-scaling group options [desired, min, max]
+    Type: CommaDelimitedList
+    Default: '1,1,1'
+Resources:
+  Group:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones:
+        - us-east-1a
+        - us-east-1b
+      DesiredCapacity: !Select [0, !Ref ASOptions]
+      MinSize: !Select [1, !Ref ASOptions]
+      MaxSize: !Select [2, !Ref ASOptions]
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}
+        PropagateAtLaunch: true
+      LaunchConfigurationName:
+        Fn::ImportValue:
+          !Sub ${AWS::StackName}-lc
+      TerminationPolicies:
+        - OldestInstance
