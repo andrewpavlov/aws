@@ -108,3 +108,16 @@ for stage in "dev" "qa" "prod"; do \
     --region $AWS_REGION; \
 done
 ```
+
+## Create pipeline resources
+
+```sh
+aws cloudformation create-stack \
+--stack-name $PROJECT_NAME-pipeline-res \
+--template-body file://nodejs-web-app-starter/pipeline-res.yml \
+--capabilities CAPABILITY_NAMED_IAM \
+--parameters \
+ParameterKey=Project,ParameterValue=$PROJECT_NAME \
+--profile $AWS_PROFILE \
+--region $AWS_REGION
+```

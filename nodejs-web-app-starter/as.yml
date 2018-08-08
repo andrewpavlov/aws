@@ -25,3 +25,8 @@ Resources:
           !Sub ${AWS::StackName}-lc
       TerminationPolicies:
         - OldestInstance
+Outputs:
+  Group:
+    Value: !Ref Group
+    Export:
+      Name: !Sub ${AWS::StackName}-as-group

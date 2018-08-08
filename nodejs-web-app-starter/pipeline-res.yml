@@ -1,0 +1,491 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Pipeline Resources
+
+Parameters:
+  Project:
+    Description: Project name
+    Type: String
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-cbr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: '*'
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-cpr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteSubscriptionFilter
+                  - s3:*
+                  - sns:*
+                  - lambda:*
+                  - autoscaling:*
+                  - cloudformation:*
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:PassRole
+                Resource: '*'
+
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-dr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteSubscriptionFilter
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                  - codedeploy:Batch*
+                  - codedeploy:Get*
+                  - codedeploy:List*
+                  - s3:Get*
+                  - s3:List*
+                  - autoscaling:CompleteLifecycleAction
+                  - autoscaling:DeleteLifecycleHook
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeLifecycleHooks
+                  - autoscaling:PutLifecycleHook
+                  - autoscaling:RecordLifecycleActionHeartbeat
+                  - autoscaling:CreateAutoScalingGroup
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:EnableMetricsCollection
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribePolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:DescribeNotificationConfigurations
+                  - autoscaling:DescribeLifecycleHooks
+                  - autoscaling:SuspendProcesses
+                  - autoscaling:ResumeProcesses
+                  - autoscaling:AttachLoadBalancers
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledUpdateGroupAction
+                  - autoscaling:PutNotificationConfiguration
+                  - autoscaling:PutLifecycleHook
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DeleteAutoScalingGroup
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:TerminateInstances
+                  - tag:GetTags
+                  - tag:GetResources
+                  - sns:Publish
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:PutMetricAlarm
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeInstanceHealth
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: '*'
+
+  CodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Ref Project
+
+  DeploymentGroupDev:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Development
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-dev-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  DeploymentGroupQA:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Staging
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-qa-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  DeploymentGroupProd:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Production
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-prod-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  PipelineNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Pipeline notification topic
+
+  PipelineApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Pipeline approval topic
+
+  EventLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+  EventLambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-asl-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          - logs:FilterLogEvents
+          - autoscaling:DescribeAutoScalingInstances
+          - autoscaling:DescribeAutoScalingGroups
+          - autoscaling:CreateOrUpdateTags
+          - autoscaling:DescribeTags
+          - autoscaling:DeleteTags
+          - codepipeline:PutJobFailureResult
+          - codepipeline:PutJobSuccessResult
+          Resource: "*"
+      Roles:
+        - !Ref EventLambdaRole
+  EventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          auto_scaling = boto3.client('autoscaling')
+          def lambda_handler(event, context):
+            try:
+              if re.search('autoscaling', event['source']):
+                type = event['detail-type']
+                if not re.search('EC2 Instance', type):
+                  return 'skipped'
+                print '[INF] Event:', type
+                
+                detail = event['detail']
+                group = detail['AutoScalingGroupName']
+                response = auto_scaling.describe_tags(
+                  Filters=[{
+                    'Name': 'auto-scaling-group',
+                    'Values': [group]
+                  }, {
+                    'Name': 'key',
+                    'Values': ['codepipeline-job-id']
+                  }],
+                )
+                if len(response['Tags']) == 0:
+                  print '[INF] Not our group. Skipped.'
+                  return 'skipped'
+                
+                tag = response['Tags'][0]
+                jobid = tag['Value']
+                print '[INFO]', 'JobID', jobid
+                response = auto_scaling.delete_tags(
+                  Tags=[tag],
+                )
+
+                if re.search(' Successful', type):
+                  put_job_success(jobid, type)
+                else:
+                  put_job_failure(jobid, type)
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+  ASConfLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+  ASConfLambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-asl-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          - logs:FilterLogEvents
+          - autoscaling:DescribeAutoScalingInstances
+          - autoscaling:SetDesiredCapacity
+          - autoscaling:DescribeAutoScalingGroups
+          - autoscaling:CreateOrUpdateTags
+          - autoscaling:DescribeTags
+          - codepipeline:PutJobFailureResult
+          - codepipeline:PutJobSuccessResult
+          Resource: "*"
+      Roles:
+        - !Ref ASConfLambdaRole
+  ASConfLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt ASConfLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          auto_scaling = boto3.client('autoscaling')
+          def lambda_handler(event, context):
+            try:
+              job_id = event['CodePipeline.job']['id']
+              job_data = event['CodePipeline.job']['data']
+              params = get_user_params(job_data)
+
+              response = auto_scaling.describe_auto_scaling_groups(
+                AutoScalingGroupNames=[
+                  params['AutoScalingGroupName'],
+                ],
+              )
+
+              group = response['AutoScalingGroups'][0]
+              capacity = -1
+              if params['Action'] == 'stop':
+                if group['DesiredCapacity'] > 0:
+                  capacity = 0
+              else:
+                if group['DesiredCapacity'] == 0:
+                  capacity = 1
+
+              if capacity > -1:
+                print('change desired capacity')
+                auto_scaling.create_or_update_tags(
+                  Tags=[{
+                    'ResourceId': params['AutoScalingGroupName'],
+                    'ResourceType': 'auto-scaling-group',
+                    'Key': 'codepipeline-job-id',
+                    'Value': job_id,
+                    'PropagateAtLaunch': False
+                  }]
+                )
+                auto_scaling.set_desired_capacity(
+                  AutoScalingGroupName=params['AutoScalingGroupName'],
+                  DesiredCapacity=capacity,
+                  HonorCooldown=True,
+                )
+              else:
+                put_job_success(job_id, 'Nothing to change')
+
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+              put_job_failure(job_id, 'Function exception: ' + str(e))
+
+          def get_user_params(job_data):
+            user_parameters = job_data['actionConfiguration']['configuration']['UserParameters']
+            return json.loads(user_parameters)
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+Outputs:
+  CodeBuildRole:
+    Value: !GetAtt CodeBuildRole.Arn
+    Export:
+      Name: !Sub ${Project}-codebuild-role
+  CodePipelineRole:
+    Value: !GetAtt CodePipelineRole.Arn
+    Export:
+      Name: !Sub ${Project}-codepipeline-role
+  CodeDeployApp:
+    Value: !Ref CodeDeployApp
+    Export:
+      Name: !Sub ${Project}-deploy-app
+  DeploymentGroupDev:
+    Value: !Ref DeploymentGroupDev
+    Export:
+      Name: !Sub ${Project}-deploygroup-dev
+  DeploymentGroupQA:
+    Value: !Ref DeploymentGroupQA
+    Export:
+      Name: !Sub ${Project}-deploygroup-qa
+  DeploymentGroupProd:
+    Value: !Ref DeploymentGroupProd
+    Export:
+      Name: !Sub ${Project}-deploygroup-prod
+  PipelineNotificationTopic:
+    Value: !Ref PipelineNotificationTopic
+    Export:
+      Name: !Sub ${Project}-notification-topic
+  PipelineApprovalTopic:
+    Value: !Ref PipelineApprovalTopic
+    Export:
+      Name: !Sub ${Project}-approval-topic
+  ASConfLambda:
+    Value: !Ref ASConfLambda
+    Export:
+      Name: !Sub ${Project}-asconf-lambda
