@@ -17,7 +17,8 @@ Set of stacks for web application based on
 export AWS_PROFILE=my-account-name
 export AWS_REGION=us-east-1
 export PROJECT_NAME=my-project
-export EC2_KEYPAIR=refigure.dev
+export EC2_KEYPAIR=keypair
+export PROJECT_VPC=my-vpc
 ```
 
 ## Create EC2 resources (like security group)
@@ -45,7 +46,7 @@ for stage in "dev" "qa" "prod"; do \
     ParameterKey=Project,ParameterValue=$PROJECT_NAME \
     ParameterKey=KeyPair,ParameterValue=$EC2_KEYPAIR \
     --profile $AWS_PROFILE \
-    --region $AWS_REGION \
+    --region $AWS_REGION; \
 done
 ```
 
@@ -87,8 +88,23 @@ for stage in "dev" "qa" "prod"; do \
     --template-body file://nodejs-web-app-starter/as.yml \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameters \
-    'ParameterKey=ASOptions,ParameterValue="1,1,1"' \
+    'ParameterKey=ASOptions,ParameterValue="0,0,1"' \
     --profile $AWS_PROFILE \
-    --region $AWS_REGION \ 
+    --region $AWS_REGION; \
+done
+```
+
+## Create Target Groups for Appliation Load Balancer (dev/qa/prod)
+
+```sh
+for stage in "dev" "qa" "prod"; do \
+    aws cloudformation create-stack \
+    --stack-name $PROJECT_NAME-tg-$stage \
+    --template-body file://nodejs-web-app-starter/tg.yml \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameters \
+    ParameterKey=VpcId,ParameterValue=$PROJECT_VPC \
+    --profile $AWS_PROFILE \
+    --region $AWS_REGION; \
 done
 ```
