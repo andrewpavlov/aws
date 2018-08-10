@@ -7,4 +7,8 @@ then, first one creates new EC2 and wait,
 but the second one will try to use EC2 immediatelly because
 AS will says (DesiredCapacity == 1)
 
+2. ASG event should setup instance event.
+ASG gets Launch event before instance checks.
+So, we need to tag run instance and
+puOK only on EC2 checks complete.
 

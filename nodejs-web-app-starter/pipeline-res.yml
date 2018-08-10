@@ -291,6 +291,7 @@ Resources:
 
           code_pipeline = boto3.client('codepipeline')
           auto_scaling = boto3.client('autoscaling')
+          sns = boto3.client('sns')
           def lambda_handler(event, context):
             try:
               if re.search('autoscaling', event['source']):
@@ -325,6 +326,13 @@ Resources:
                   put_job_success(jobid, type)
                 else:
                   put_job_failure(jobid, type)
+              # else if re.search('codebuild', event['source']):
+              #   detail = event['detail']
+              # else if re.search('codedeploy', event['source']):
+              #   detail = event['detail']
+              # else if re.search('codepipeline', event['source']):
+              #   detail = event['detail']
+              
             except Exception as e:
               print('Failed due to exception.') 
               print(e)
@@ -339,6 +347,89 @@ Resources:
             print('Putting job failure')
             print(message)
             code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+          send_sns(topic, subject, message):
+            response = sns.publish(
+                TopicArn=topic,
+                Message=message,
+                Subject=subject,
+                MessageStructure='json',
+            )
+            print 'SNS sent', response
+
+  AutoScalingGroupRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type":
+          - "EC2 Instance Launch Successful"
+          - "EC2 Instance Launch Unsuccessful"
+          - "EC2 Instance Terminate Successful"
+          - "EC2 Instance Terminate Unsuccessful"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt EventLambda.Arn
+          Id: "AutoScalingGroupRuleId"
+
+  CodeBuildRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codebuild"
+        detail-type:
+          - "CodeBuild Build State Change"
+        detail:
+          build-status:
+            - "FAILED"
+            - "SUCCEEDED"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt EventLambda.Arn
+          Id: "CodeBuildRuleId"
+
+  CodeDeployRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codedeploy"
+        detail-type:
+          - "CodeDeploy Deployment State-change Notification"
+        detail:
+          state:
+            - "FAILURE"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt EventLambda.Arn
+          Id: "CodeDeployRuleId"
+
+  CodePipelineRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codepipeline"
+        detail-type:
+          - "CodePipeline Pipeline Execution State Change"
+        detail:
+          state:
+            - "FAILED"
+            - "SUCCEEDED"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt EventLambda.Arn
+          Id: "CodePipelineRuleId"
 
   ASConfLambdaRole:
     Type: AWS::IAM::Role
