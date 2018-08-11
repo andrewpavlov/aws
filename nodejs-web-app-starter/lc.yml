@@ -105,41 +105,40 @@ Resources:
 
             if [[ ! -z "$FromHost" ]]; then
               echo "...Migrate"
-              WronConf=""
+              WrongConf=""
               if [[ -z "$FromPort" ]]; then
                 FromPort=3306
               fi
               if [[ -z "$FromUser" ]]; then
                 if [[ -z "$MyUser" ]]; then
-                  WronConf="MySQL user is not valid"
+                  WrongConf="MySQL user is not valid"
                 else
                   FromUser=$MyUser
                 fi
               fi
               if [[ -z "$FromPassword" ]]; then
                 if [[ -z "$MyPassword" ]]; then
-                  WronConf="$WronConf, MySQL password is not valid"
+                  WrongConf="$WrongConf, MySQL password is not valid"
                 else
                   FromPassword=$MyPassword
                 fi
               fi
               if [[ -z "$FromDB" ]]; then
                 if [[ -z "$MyDB" ]]; then
-                  WronConf="$WronConf, MySQL database is not valid"
+                  WrongConf="$WrongConf, MySQL database is not valid"
                 else
                   FromDB=$MyDB
                 fi
               fi
-              if [[ -z "$WronConf" ]]; then
+              if [[ -z "$WrongConf" ]]; then
                 CreateDB=""
                 if [[ -z "$MyDB" ]]; then
                   CreateDB="--databases"
                 fi
                 
-                mysqldump -h$FromHost -P$FromPort -udbadmin -p$FromPassword \
-                --routines --events --triggers $CreateDB "$FromDB" > dump || true
+                mysqldump -h$FromHost -P$FromPort -udbadmin -p$FromPassword --routines --events --triggers $CreateDB "$FromDB" > /tmp/mysql-dump || true
                 
-                mysql -uroot -p$MyPassword $MyDB < dump
+                mysql -uroot -p$MyPassword $MyDB < /tmp/mysql-dump
               else
                 echo "MySQL import configuration error(s): $WrongConf"
               fi
