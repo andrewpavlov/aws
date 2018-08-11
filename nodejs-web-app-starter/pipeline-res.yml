@@ -279,6 +279,9 @@ Resources:
               - autoscaling:CreateOrUpdateTags
               - autoscaling:DescribeTags
               - autoscaling:DeleteTags
+              - codepipeline:GetPipeline
+              - codepipeline:GetJobDetails
+              - codepipeline:GetPipelineState
               - codepipeline:PutJobFailureResult
               - codepipeline:PutJobSuccessResult
               Resource: "*"
@@ -339,9 +342,28 @@ Resources:
               #   detail = event['detail']
               # else if re.search('codedeploy', event['source']):
               #   detail = event['detail']
-              # else if re.search('codepipeline', event['source']):
-              #   detail = event['detail']
-              
+              else if re.search('codepipeline', event['source']):
+                detail = event['detail']
+                status = detail['status']
+                if status == 'FAILED':
+                  subject = '${Project} pipeline ' + detail['pipeline'] + ' has FAILED'
+                  message = get_pipeline_info_txt(event)
+                  json_message = {
+                    'default': message,
+                    'email': message,
+                    'sms': subject,
+                  }
+                  send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+                elif status == 'SUCCEEDED':
+                  subject = '${Project} pipeline ' + detail['pipeline'] + ' has SUCCEEDED'
+                  message = get_pipeline_info_txt(event)
+                  json_message = {
+                    'default': message,
+                    'email': message,
+                    'sms': subject,
+                  }
+                  send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+
             except Exception as e:
               print('Failed due to exception.') 
               print(e)
@@ -356,6 +378,18 @@ Resources:
             print('Putting job failure')
             print(message)
             code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+          def get_pipeline_info_txt(event):
+            detail = event['detail']
+            # response = client.get_pipeline_execution(
+            #     pipelineName=detail['pipeline'],
+            #     pipelineExecutionId=detail['execution-id']
+            # )
+            info = 'Status: ' + detail['status']
+            info += '\nTime: ' + event['time']
+            info += '\Arn: ' + event['resources'][0]
+            info += '\nExecution Id: ' + detail['execution-id']
+            return info
 
           def send_sns(topic, subject, message):
             response = sns.publish(
@@ -560,8 +594,7 @@ Resources:
                 'email': emailMessage,
                 'sms': subject,
               }
-              print 'json_message', json_message
-              send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+              send_sns('${PipelineApprovalTopic}', subject, json.dumps(json_message))
             except Exception as e:
               print('Failed due to exception.')
               print(e)
