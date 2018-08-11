@@ -962,7 +962,3 @@ Outputs:
     Value: !Ref ASConfLambda
     Export:
       Name: !Sub ${Project}-asconf-lambda
-  WebHookApi:
-    Value: !Sub https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/${WebHookApiProdStage}/
-    Export:
-      Name: !Sub ${Project}-api
