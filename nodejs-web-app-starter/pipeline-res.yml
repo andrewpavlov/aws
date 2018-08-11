@@ -251,29 +251,26 @@ Resources:
           Action:
           - sts:AssumeRole
       Path: "/"
-  EventLambdaPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: !Sub "${AWS::StackName}-asl-policy"
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Action:
-          - logs:CreateLogGroup
-          - logs:CreateLogStream
-          - logs:PutLogEvents
-          - logs:FilterLogEvents
-          - autoscaling:DescribeAutoScalingInstances
-          - autoscaling:DescribeAutoScalingGroups
-          - autoscaling:CreateOrUpdateTags
-          - autoscaling:DescribeTags
-          - autoscaling:DeleteTags
-          - codepipeline:PutJobFailureResult
-          - codepipeline:PutJobSuccessResult
-          Resource: "*"
-      Roles:
-        - !Ref EventLambdaRole
+      Policies:
+        - 
+          PolicyName: !Sub "${AWS::StackName}-elr-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:FilterLogEvents
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:CreateOrUpdateTags
+              - autoscaling:DescribeTags
+              - autoscaling:DeleteTags
+              - codepipeline:PutJobFailureResult
+              - codepipeline:PutJobSuccessResult
+              Resource: "*"
   EventLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -294,6 +291,7 @@ Resources:
           sns = boto3.client('sns')
           def lambda_handler(event, context):
             try:
+              print 'INPUT:', event
               if re.search('autoscaling', event['source']):
                 type = event['detail-type']
                 if not re.search('EC2 Instance', type):
@@ -431,6 +429,214 @@ Resources:
           Arn: !GetAtt EventLambda.Arn
           Id: "CodePipelineRuleId"
 
+  WebHookLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-whlr-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:DeleteLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:PutRetentionPolicy'
+                  - 'lambda:InvokeAsync'
+                  - 'lambda:InvokeFunction'
+                  - 'iam:GetRole'
+                Resource: '*'
+
+  WebHookLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      MemorySize: '128'
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt WebHookLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+          import urllib
+
+          client = boto3.client('lambda')
+          pipeline = boto3.client('codepipeline')
+          kms = boto3.client('kms')
+          def lambda_handler(event, context):
+            try:
+              if not event['body']:
+                return {
+                  'statusCode': 200,
+                  'headers': {'Content-Type': 'text/html'},
+                  'body': ' \
+                  <html> \
+                    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"> \
+                    <body> \
+                      <form method=post encrypt="application/x-www-form-urlencoded"> \
+                        <div class="modal" tabindex="-1" role="dialog" style="display: block;"> \
+                          <div class="modal-dialog" role="document"> \
+                            <div class="modal-content"> \
+                              <div class="modal-header"> \
+                                <h5 class="modal-title">Resolution</h5> \
+                              </div> \
+                              <div class="modal-body"> \
+                                <div class="form-group"> \
+                                  <textarea class="form-control" name="message" rows="3" required></textarea> \
+                                </div> \
+                              </div> \
+                              <div class="modal-footer"> \
+                                <button type="submit" name="resolution" value="REJECTED" class="btn btn-danger">Reject</button> \
+                                <button type="submit" name="resolution" value="APPROVED" class="btn btn-primary">Approve</button> \
+                              </div> \
+                            </div> \
+                          </div> \
+                        </div> \
+                      </form> \
+                    </body> \
+                  </html> \
+                '}
+
+              params = {x[0] : urllib.unquote_plus(x[1]).decode('utf8') for x in [x.split("=") for x in event['body'].split("&") ]}
+              
+              if not params['message'] and (params['resolution'] != 'approved' or params['resolution'] != 'rejected'):
+                return {'statusCode': 401, 'body': 'Bad parameters'}
+              
+              
+              jobId=event['pathParameters']['jobId']
+              response = pipeline.get_job_details(
+                  jobId=jobId
+              )
+              print 'JobID: ', response
+              if not reposone:
+                return {'statusCode': 404, 'body': 'Wrong JobId'}
+              
+              return {'statusCode': 200, 'body': params['message']}
+
+              detail = {
+                'job-id': jobId,
+              }
+              
+              resolution = event['pathParameters']['resolution']
+              if resolution == 'approved':
+                detailt['state'] = 'APPROVED'
+                # detailt['message'] = '' || 'Approved'
+              elif resolution == 'rejected':
+                detailt['state'] = 'REJECTED'
+                # detailt['message'] = '' || 'Rejected'
+              else:
+                return {'statusCode': 401, 'body': 'Bad resolution'}
+
+              return {'statusCode': 200, 'body': 'Approved'}
+            except Exception as e:
+              print('Failed due to exception.')
+              print(e)
+              return {'statusCode': 500, 'body': 'Error ecccorred'}
+
+  WebHookRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - >-
+          arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-whr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeAsync'
+                  - 'lambda:InvokeFunction'
+                Resource:
+                  - !GetAtt WebHookLambda.Arn
+
+  WebHookApi:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      Description: !Sub ${Project} pipeline api
+      Body:
+        swagger: '2.0'
+        info:
+          version: '1.0'
+          title: !Ref 'AWS::StackName'
+        schemes:
+          - https
+        paths:
+          /{jobId}/{resolution}:
+            get:
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                uri: !Join
+                  - ''
+                  - - 'arn:aws:apigateway:'
+                    - !Ref 'AWS::Region'
+                    - ':lambda:path/2015-03-31/functions/'
+                    - !GetAtt WebHookLambda.Arn
+                    - /invocations
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                credentials: !GetAtt WebHookRole.Arn
+                type: aws_proxy
+            post:
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                uri: !Join
+                  - ''
+                  - - 'arn:aws:apigateway:'
+                    - !Ref 'AWS::Region'
+                    - ':lambda:path/2015-03-31/functions/'
+                    - !GetAtt WebHookLambda.Arn
+                    - /invocations
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                credentials: !GetAtt WebHookRole.Arn
+                type: aws_proxy
+
+  WebHookApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref WebHookApi
+
+  WebHookApiProdStage:
+    Type: 'AWS::ApiGateway::Stage'
+    Properties:
+      DeploymentId: !Ref WebHookApiDeployment
+      RestApiId: !Ref WebHookApi
+      StageName: v1
+
   ASConfLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -444,29 +650,26 @@ Resources:
           Action:
           - sts:AssumeRole
       Path: "/"
-  ASConfLambdaPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: !Sub "${AWS::StackName}-asl-policy"
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Action:
-          - logs:CreateLogGroup
-          - logs:CreateLogStream
-          - logs:PutLogEvents
-          - logs:FilterLogEvents
-          - autoscaling:DescribeAutoScalingInstances
-          - autoscaling:SetDesiredCapacity
-          - autoscaling:DescribeAutoScalingGroups
-          - autoscaling:CreateOrUpdateTags
-          - autoscaling:DescribeTags
-          - codepipeline:PutJobFailureResult
-          - codepipeline:PutJobSuccessResult
-          Resource: "*"
-      Roles:
-        - !Ref ASConfLambdaRole
+      Policies:
+        - 
+          PolicyName: !Sub "${AWS::StackName}-asl-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:FilterLogEvents
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:CreateOrUpdateTags
+              - autoscaling:DescribeTags
+              - codepipeline:PutJobFailureResult
+              - codepipeline:PutJobSuccessResult
+              Resource: "*"
   ASConfLambda:
     Type: AWS::Lambda::Function
     Properties:
