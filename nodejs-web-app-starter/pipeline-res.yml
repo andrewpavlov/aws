@@ -407,7 +407,7 @@ Resources:
       EventPattern:
         source:
           - "aws.autoscaling"
-        detail-type":
+        detail-type:
           - "EC2 Instance Launch Successful"
           - "EC2 Instance Launch Unsuccessful"
           - "EC2 Instance Terminate Successful"
