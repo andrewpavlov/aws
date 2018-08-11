@@ -136,7 +136,7 @@ Resources:
                   CreateDB="--databases"
                 fi
                 
-                mysqldump -h$FromHost -P$FromPort -udbadmin -p$FromPassword --routines --events --triggers $CreateDB "$FromDB" > /tmp/mysql-dump || true
+                mysqldump -h$FromHost -P$FromPort -u$FromUser -p$FromPassword --routines --events --triggers $CreateDB "$FromDB" > /tmp/mysql-dump || true
                 
                 mysql -uroot -p$MyPassword $MyDB < /tmp/mysql-dump
               else

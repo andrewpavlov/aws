@@ -249,6 +249,22 @@ Resources:
     Properties: 
       DisplayName: Pipeline approval topic
 
+  PipelineApprovalInternalTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Internal topic for pipeline stages Category=Approval
+      Subscription:
+        - Endpoint: !GetAtt PipelineNotifyLambda.Arn
+          Protocol: lambda
+
+  PipelineApprovalInternalTopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref PipelineApprovalInternalTopic
+      FunctionName: !GetAtt PipelineNotifyLambda.Arn
+
   EventLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -284,6 +300,7 @@ Resources:
               - codepipeline:GetPipelineState
               - codepipeline:PutJobFailureResult
               - codepipeline:PutJobSuccessResult
+              - sns:Publish
               Resource: "*"
   EventLambda:
     Type: AWS::Lambda::Function
@@ -338,13 +355,13 @@ Resources:
                   put_job_success(jobid, type)
                 else:
                   put_job_failure(jobid, type)
-              # else if re.search('codebuild', event['source']):
+              # elif re.search('codebuild', event['source']):
               #   detail = event['detail']
-              # else if re.search('codedeploy', event['source']):
+              # elif re.search('codedeploy', event['source']):
               #   detail = event['detail']
-              else if re.search('codepipeline', event['source']):
+              elif re.search('codepipeline', event['source']):
                 detail = event['detail']
-                status = detail['status']
+                status = detail['state']
                 if status == 'FAILED':
                   subject = '${Project} pipeline ' + detail['pipeline'] + ' has FAILED'
                   message = get_pipeline_info_txt(event)
@@ -385,7 +402,7 @@ Resources:
             #     pipelineName=detail['pipeline'],
             #     pipelineExecutionId=detail['execution-id']
             # )
-            info = 'Status: ' + detail['status']
+            info = 'Status: ' + detail['state']
             info += '\nTime: ' + event['time']
             info += '\Arn: ' + event['resources'][0]
             info += '\nExecution Id: ' + detail['execution-id']
@@ -418,6 +435,15 @@ Resources:
           Arn: !GetAtt EventLambda.Arn
           Id: "AutoScalingGroupRuleId"
 
+  AutoScalingGroupRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: EventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AutoScalingGroupRule.Arn
+
   CodeBuildRule:
     Type: AWS::Events::Rule
     Properties: 
@@ -437,6 +463,15 @@ Resources:
           Arn: !GetAtt EventLambda.Arn
           Id: "CodeBuildRuleId"
 
+  CodeBuildRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: EventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodeBuildRule.Arn
+
   CodeDeployRule:
     Type: AWS::Events::Rule
     Properties: 
@@ -454,6 +489,15 @@ Resources:
         - 
           Arn: !GetAtt EventLambda.Arn
           Id: "CodeDeployRuleId"
+
+  CodeDeployRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: EventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodeDeployRule.Arn
 
   CodePipelineRule:
     Type: AWS::Events::Rule
@@ -473,6 +517,15 @@ Resources:
         - 
           Arn: !GetAtt EventLambda.Arn
           Id: "CodePipelineRuleId"
+
+  CodePipelineRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: EventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodePipelineRule.Arn
 
   KMS:
     Type: AWS::KMS::Key
@@ -575,6 +628,9 @@ Resources:
           sns = boto3.client('sns')
           def lambda_handler(event, context):
             try:
+              if not 'CodePipeline.job' in event:
+                print 'EVENT:', event
+                return 'test'
               job_id = event['CodePipeline.job']['id']
               job_id_enc = encrypt_jobid(job_id)
               job_data = event['CodePipeline.job']['data']
@@ -991,6 +1047,10 @@ Outputs:
     Value: !Ref PipelineNotifyLambda
     Export:
       Name: !Sub ${Project}-notify-lambda
+  PipelineApprovalInternalTopic:
+    Value: !Ref PipelineApprovalInternalTopic
+    Export:
+      Name: !Sub ${Project}-approval-i-topic
   ASConfLambda:
     Value: !Ref ASConfLambda
     Export:
