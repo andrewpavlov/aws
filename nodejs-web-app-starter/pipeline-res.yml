@@ -6,6 +6,17 @@ Parameters:
   Project:
     Description: Project name
     Type: String
+  KPUserArn:
+    Description: Key policy applied user ARN (arn:aws:iam::ACCOUNTID:root)
+    Type: String
+    Default: ''
+
+Conditions:
+  HasKPUserArn:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: KPUserArn
+      - ''
 
 Resources:
   CodeBuildRole:
@@ -346,7 +357,7 @@ Resources:
             print(message)
             code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
 
-          send_sns(topic, subject, message):
+          def send_sns(topic, subject, message):
             response = sns.publish(
                 TopicArn=topic,
                 Message=message,
@@ -429,6 +440,169 @@ Resources:
           Arn: !GetAtt EventLambda.Arn
           Id: "CodePipelineRuleId"
 
+  KMS:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::If:
+                - HasKPUserArn
+                - Ref: KPUserArn
+                - Fn::Sub: arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt PipelineNotifyLambdaRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt WebHookLambdaRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: "*"
+
+  PipelineNotifyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-plr-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - sns:Publish
+                  - codepipeline:PutJobFailureResult
+                Resource: '*'
+
+  PipelineNotifyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      MemorySize: '128'
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt PipelineNotifyLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+          import base64
+          import urllib
+
+          code_pipeline = boto3.client('codepipeline')
+          kms = boto3.client('kms')
+          sns = boto3.client('sns')
+          def lambda_handler(event, context):
+            try:
+              job_id = event['CodePipeline.job']['id']
+              job_id_enc = encrypt_jobid(job_id)
+              job_data = event['CodePipeline.job']['data']
+              user_params = get_user_params(job_data)
+              artifact = find_artifact(job_data['inputArtifacts'], 'Source')
+
+              subject = 'New version of ${Project} is wating for approval'
+              url = 'https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/'
+              url += '${WebHookApiProdStage}/'
+              url += urllib.quote_plus(job_id_enc)
+              emailMessage = 'Hey!'
+              if 'Url' in user_params:
+                emailMessage += '\nYou can try new version here\n' + user_params['Url']
+              emailMessage += '\nTo approve or reject new version goto\n' + url
+              json_message = {
+                'default': 'To approve/reject new version click ' + url,
+                'email': emailMessage,
+                'sms': subject,
+              }
+              print 'json_message', json_message
+              send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+            except Exception as e:
+              print('Failed due to exception.')
+              print(e)
+              put_job_failure(job_id, 'Function exception: ' + str(e))
+
+          def encrypt_jobid(job_id):
+            response = kms.encrypt(KeyId='${KMS}', Plaintext=job_id)
+            binary_encrypted = response[u'CiphertextBlob']
+            base64_encrypted = base64.b64encode(binary_encrypted)
+            return base64_encrypted.decode()
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+          def send_sns(topic, subject, message):
+            response = sns.publish(
+                TopicArn=topic,
+                Subject=subject,
+                MessageStructure='json',
+                Message=message,
+            )
+            print 'SNS sent', response
+
+          def get_user_params(job_data):
+            try:
+              # Get the user parameters which contain the stack, artifact and file settings
+              user_parameters = job_data['actionConfiguration']['configuration']['UserParameters']
+              decoded_parameters = json.loads(user_parameters)
+            except Exception as e:
+              # We're expecting the user parameters to be encoded as JSON
+              raise Exception('UserParameters could not be decoded as JSON')
+            return decoded_parameters
+
+          def find_artifact(artifacts, name):
+            for artifact in artifacts:
+              if artifact['name'] == name:
+                return artifact
+            raise Exception('Input artifact named "{0}" not found in event'.format(name))
+
   WebHookLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -452,15 +626,19 @@ Resources:
               -
                 Effect: Allow
                 Action:
-                  - 'logs:DescribeLogGroups'
-                  - 'logs:CreateLogGroup'
-                  - 'logs:DeleteLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                  - 'logs:PutRetentionPolicy'
-                  - 'lambda:InvokeAsync'
-                  - 'lambda:InvokeFunction'
-                  - 'iam:GetRole'
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - iam:GetRole
+                  - sns:Publish
+                  - codepipeline:GetPipeline
+                  - codepipeline:GetJobDetails
+                  - codepipeline:GetPipelineState
+                  - codepipeline:PutJobFailureResult
+                  - codepipeline:PutJobSuccessResult
                 Resource: '*'
 
   WebHookLambda:
@@ -477,13 +655,21 @@ Resources:
           import boto3
           import botocore
           import traceback
+          import base64
           import urllib
 
-          client = boto3.client('lambda')
-          pipeline = boto3.client('codepipeline')
+          code_pipeline = boto3.client('codepipeline')
           kms = boto3.client('kms')
           def lambda_handler(event, context):
             try:
+              job_id_encoded = event['pathParameters']['jobIdEncoded']
+              job_id_encoded = urllib.unquote_plus(job_id_encoded)
+              job_id=descrypt_jobid(job_id_encoded)
+              response = code_pipeline.get_job_details(
+                  jobId=job_id
+              )
+              print response
+
               if not event['body']:
                 return {
                   'statusCode': 200,
@@ -517,40 +703,37 @@ Resources:
                 '}
 
               params = {x[0] : urllib.unquote_plus(x[1]).decode('utf8') for x in [x.split("=") for x in event['body'].split("&") ]}
-              
-              if not params['message'] and (params['resolution'] != 'approved' or params['resolution'] != 'rejected'):
+              if not params['message'] or not params['resolution']:
                 return {'statusCode': 401, 'body': 'Bad parameters'}
-              
-              
-              jobId=event['pathParameters']['jobId']
-              response = pipeline.get_job_details(
-                  jobId=jobId
-              )
-              print 'JobID: ', response
-              if not reposone:
-                return {'statusCode': 404, 'body': 'Wrong JobId'}
-              
-              return {'statusCode': 200, 'body': params['message']}
 
-              detail = {
-                'job-id': jobId,
-              }
-              
-              resolution = event['pathParameters']['resolution']
-              if resolution == 'approved':
-                detailt['state'] = 'APPROVED'
-                # detailt['message'] = '' || 'Approved'
-              elif resolution == 'rejected':
-                detailt['state'] = 'REJECTED'
-                # detailt['message'] = '' || 'Rejected'
+              if params['resolution'] == 'APPROVED':
+                put_job_success(job_id, params['message'])
+              elif params['resolution'] == 'REJECTED':
+                put_job_failure(job_id, params['message'])
               else:
-                return {'statusCode': 401, 'body': 'Bad resolution'}
+                return {'statusCode': 401, 'body': 'Bad parameters'}
 
-              return {'statusCode': 200, 'body': 'Approved'}
+              return {'statusCode': 200, 'body': params['resolution']}
             except Exception as e:
               print('Failed due to exception.')
               print(e)
-              return {'statusCode': 500, 'body': 'Error ecccorred'}
+              return {'statusCode': 500, 'body': 'Error ecccorred ' + str(e)}
+
+          def descrypt_jobid(job_id):
+            binary_data = base64.b64decode(job_id)
+            meta = kms.decrypt(CiphertextBlob=binary_data)
+            plaintext = meta[u'Plaintext']
+            return plaintext.decode()
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
 
   WebHookRole:
     Type: 'AWS::IAM::Role'
@@ -591,7 +774,7 @@ Resources:
         schemes:
           - https
         paths:
-          /{jobId}/{resolution}:
+          /{jobIdEncoded}:
             get:
               x-amazon-apigateway-integration:
                 responses:
@@ -771,15 +954,15 @@ Outputs:
     Value: !Ref DeploymentGroupProd
     Export:
       Name: !Sub ${Project}-deploygroup-prod
-  PipelineNotificationTopic:
-    Value: !Ref PipelineNotificationTopic
+  PipelineNotifyLambda:
+    Value: !Ref PipelineNotifyLambda
     Export:
-      Name: !Sub ${Project}-notification-topic
-  PipelineApprovalTopic:
-    Value: !Ref PipelineApprovalTopic
-    Export:
-      Name: !Sub ${Project}-approval-topic
+      Name: !Sub ${Project}-notify-lambda
   ASConfLambda:
     Value: !Ref ASConfLambda
     Export:
       Name: !Sub ${Project}-asconf-lambda
+  WebHookApi:
+    Value: !Sub https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/${WebHookApiProdStage}/
+    Export:
+      Name: !Sub ${Project}-api
