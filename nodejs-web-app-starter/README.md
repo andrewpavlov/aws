@@ -55,15 +55,12 @@ Where:
 
 ### Launch configuration run-time parameters
 
-Create "String" value and add any parameters  
+Create Parameters Store "String" $PROJECT_NAME-#stage-lc value and add any parameters  
 ```ParameterKey=ParameterValue``` (one per line)
 
 * Required
-    * SiteDir - EC2 local path (/var/www/$SiteDir/)
-    * ServiceCmd - Service command (node /var/www/$SiteDir/$ServiceCmd)
+    * ServiceCmd - Service command (node /var/www/$PROJECT_NAME/$ServiceCmd)
 * Optional
-    * Route53
-        * Domain/SubDomain - Register EC2 as SubDomain.Domain
     * MySQL
         * MyUser - use this instead of root
         * MyPassword - for both root and MyUser

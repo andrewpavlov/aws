@@ -56,35 +56,6 @@ Resources:
           done
           echo "...done"
 
-          # Route53
-          echo "Configure Route53"
-          if [[ ! -z "$Domain"  &&  ! -z "$SubDomain" ]]; then
-            HostedZoneId=$(aws route53 list-hosted-zones | jq -r --arg name $Domain. '.HostedZones[] | select(.Name == $name and .Config.PrivateZone == false) | .Id | ltrimstr("/hostedzone/")')
-            PublicIpAddr=$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)
-            echo "{ \
-                \"Comment\": \"Update record to ec2 instance\", \
-                \"Changes\": [ \
-                    { \
-                        \"Action\": \"UPSERT\", \
-                        \"ResourceRecordSet\": { \
-                            \"Name\": \"$SubDomain.$Domain.\", \
-                            \"Type\": \"CNAME\", \
-                            \"TTL\": 300, \
-                            \"ResourceRecords\": [ \
-                                { \
-                                    \"Value\": \"$PublicIpAddr\" \
-                                } \
-                            ] \
-                        } \
-                    } \
-                ] \
-            }" > /tmp/RecordsChanges
-
-            aws route53 change-resource-record-sets \
-            --hosted-zone-id $HostedZoneId \
-            --change-batch file:///tmp/RecordsChanges
-          fi
-
           # My SQL
           echo "Configure MySQL"
           if [[ ! -z "$MyPassword" ]]; then
@@ -146,30 +117,27 @@ Resources:
           fi
 
           # Web service
-          echo "Configure Web service - $SiteDir;$ServiceCmd"
-          if [[ ! -z "$SiteDir" ]]; then
-            mkdir -p /var/www/$SiteDir/
+          echo "Configure Web service - $ServiceCmd"
+          mkdir -p /var/www/${Project}/
+          if [[ ! -z "$ServiceCmd" ]]; then
+            echo "[Unit]
+            Description=${Project} web service
+            After=network.target
 
-            if [[ ! -z "$ServiceCmd" ]]; then
-              echo "[Unit]
-              Description=${Project} web service
-              After=network.target
+            [Service]
+            Type=simple
+            User=root
+            KillSignal=SIGQUIT
+            ExecStart=/bin/bash -ce \"exec /usr/bin/node /var/www/${Project}/$ServiceCmd >> /var/log/${Project}-service.log 2>&1\"
+            StandardOutput=syslog
+            StandardError=syslog
+            SyslogIdentifier=${Project}
+            Restart=always
 
-              [Service]
-              Type=simple
-              User=root
-              KillSignal=SIGQUIT
-              ExecStart=/bin/bash -ce \"exec /usr/bin/node /var/www/$SiteDir/$ServiceCmd >> /var/log/${Project}-service.log 2>&1\"
-              StandardOutput=syslog
-              StandardError=syslog
-              SyslogIdentifier=${Project}
-              Restart=always
+            [Install]
+            WantedBy=multi-user.target" > /etc/systemd/system/${Project}.service
 
-              [Install]
-              WantedBy=multi-user.target" > /etc/systemd/system/${Project}.service
-
-              systemctl enable ${Project}
-            fi
+            systemctl enable ${Project}
           fi
 
           # Efs

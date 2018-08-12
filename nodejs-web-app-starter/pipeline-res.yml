@@ -295,6 +295,10 @@ Resources:
               - autoscaling:CreateOrUpdateTags
               - autoscaling:DescribeTags
               - autoscaling:DeleteTags
+              - elasticloadbalancing:RegisterTargets
+              - ec2:DescribeInstances
+              - route53:ListHostedZonesByName
+              - route53:ChangeResourceRecordSets
               - codepipeline:GetPipeline
               - codepipeline:GetJobDetails
               - codepipeline:GetPipelineState
@@ -338,6 +342,7 @@ Resources:
 
           code_pipeline = boto3.client('codepipeline')
           auto_scaling = boto3.client('autoscaling')
+          elb = boto3.client('elbv2')
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
@@ -353,24 +358,44 @@ Resources:
                   'Values': [group]
                 }, {
                   'Name': 'key',
-                  'Values': ['codepipeline-job-id']
+                  'Values': [
+                    'codepipeline-job-id',
+                    'target-group',
+                    'route53-record'
+                  ]
                 }],
               )
               if len(response['Tags']) == 0:
                 print '[INF] Not our group. Skipped.'
                 return 'skipped'
               
-              tag = response['Tags'][0]
-              jobid = tag['Value']
-              print '[INFO]', 'JobID', jobid
+              tags = {}
+              for tag in response['Tags']:
+                if tag['Key'] == 'route53-record':
+                  tags[tag['Key']] = json.loads(tag['Value'])
+                else:
+                  tags[tag['Key']] = tag['Value']
+              print '[INF] Tags:', tags                  
+              
               response = auto_scaling.delete_tags(
-                Tags=[tag],
+                Tags=response['Tags'],
               )
-
               if re.search(' Successful', type):
-                put_job_success(jobid, type)
+                if re.search(' Launch', type):
+                  if 'target-group' in tags:
+                    elb.register_targets(
+                      TargetGroupArn=tags['target-group'],
+                      Targets=[{
+                        'Id': detail['EC2InstanceId'],
+                      }]
+                    )
+                  if 'route53-record' in tags:
+                    info = tags['route53-record']
+                    add_53_record(info['zone'], info['record'], detail['EC2InstanceId']);
+
+                put_job_success(tags['codepipeline-job-id'], type)
               else:
-                put_job_failure(jobid, type)
+                put_job_failure(tags['codepipeline-job-id'], type)
 
             except Exception as e:
               print('Failed due to exception.') 
@@ -386,6 +411,36 @@ Resources:
             print('Putting job failure')
             print(message)
             code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+          def add_53_record(zone, record, instance_id):
+            response = ec2.describe_instances(InstanceIds = [instance_id])
+            dns = response['Reservations'][0]['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicDnsName']
+            response = route53.list_hosted_zones_by_name(
+              DNSName=zone
+            )
+            zone_id = response['HostedZones'][0]['Id']
+            print 'DNS', dns, 'ZoneId', zone_id
+            route53.change_resource_record_sets(
+              HostedZoneId=zone_id,
+              ChangeBatch={
+                'Comment': 'Update record to ec2 instance',
+                'Changes': [
+                  {
+                    'Action': 'UPSERT',
+                    'ResourceRecordSet': {
+                      'Name': record + '.' + zone,
+                      'Type': 'CNAME',
+                      'TTL': 300,
+                      'ResourceRecords': [
+                        {
+                          'Value': dns
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            )
 
   CodePipelineEventLambda:
     Type: AWS::Lambda::Function
@@ -1064,14 +1119,32 @@ Resources:
 
               if capacity > -1:
                 print('change desired capacity')
-                auto_scaling.create_or_update_tags(
-                  Tags=[{
+                tags = [{
                     'ResourceId': params['AutoScalingGroupName'],
                     'ResourceType': 'auto-scaling-group',
                     'Key': 'codepipeline-job-id',
                     'Value': job_id,
                     'PropagateAtLaunch': False
-                  }]
+                }]
+                if capacity > 0:
+                  if 'TargetGroup' in params:
+                    tags.append({
+                      'ResourceId': params['AutoScalingGroupName'],
+                      'ResourceType': 'auto-scaling-group',
+                      'Key': 'target-group',
+                      'Value': params['TargetGroup'],
+                      'PropagateAtLaunch': False
+                    })
+                  if 'Route53' in params:
+                    tags.append({
+                      'ResourceId': params['AutoScalingGroupName'],
+                      'ResourceType': 'auto-scaling-group',
+                      'Key': 'route53-record',
+                      'Value': json.dumps(params['Route53']),
+                      'PropagateAtLaunch': False
+                    })
+                auto_scaling.create_or_update_tags(
+                  Tags=tags
                 )
                 auto_scaling.set_desired_capacity(
                   AutoScalingGroupName=params['AutoScalingGroupName'],
