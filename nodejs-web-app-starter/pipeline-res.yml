@@ -298,8 +298,10 @@ Resources:
               - codepipeline:GetPipeline
               - codepipeline:GetJobDetails
               - codepipeline:GetPipelineState
+              - codepipeline:GetPipelineExecution
               - codepipeline:PutJobFailureResult
               - codepipeline:PutJobSuccessResult
+              - s3:Get*
               - sns:Publish
               Resource: "*"
 
@@ -404,6 +406,8 @@ Resources:
 
           code_pipeline = boto3.client('codepipeline')
           sns = boto3.client('sns')
+          s3 = boto3.client('s3')
+          s3res = boto3.resource('s3')
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
@@ -436,12 +440,14 @@ Resources:
 
           def get_pipeline_info_txt(event):
             detail = event['detail']
+            pipeline = detail['pipeline']
+            execution_id = detail['execution-id']
             text = 'Status: ' + detail['state']
             text += '\nTime: ' + event['time']
             text += '\nArn: ' + event['resources'][0]
-            text += '\nExecution Id: ' + detail['execution-id']
+            text += '\nExecution Id: ' + execution_id
             response = code_pipeline.get_pipeline_state(
-              name=detail['pipeline']
+              name=pipeline
             )
             for stage in response['stageStates']:
               stageText = 'Stage Name: ' + stage['stageName']
@@ -458,6 +464,49 @@ Resources:
                     stageText += '\n\tError details: ' + str(latestExecution['errorDetails'])
               if latestExecution:
                 text += '\n' + stageText
+            
+            response = code_pipeline.get_pipeline_execution(
+              pipelineName=pipeline,
+              pipelineExecutionId=execution_id
+            )
+            version = response['pipelineExecution']['artifactRevisions'][0]['revisionId']
+            # print 'execution', response
+            
+            response = code_pipeline.get_pipeline(
+              name=pipeline
+            )
+            # print 'get_pipeline', response
+            stages = response['pipeline']['stages']
+            configuration = stages[0]['actions'][0]['configuration']
+            
+            tags = s3.get_object_tagging(
+              Bucket=configuration['S3Bucket'],
+              Key=configuration['S3ObjectKey'],
+              VersionId=version
+            )
+            tags = tags['TagSet']
+            meta = {}
+            for tag in tags:
+              meta[tag['Key']] = tag['Value']
+            folder = configuration['S3ObjectKey'].replace('.zip', '')
+            key = folder + '/' + meta['reference']
+            # print key, meta['version']
+            
+            obj = s3res.Object(configuration['S3Bucket'], key)
+            history = obj.get(VersionId=meta['version'])['Body'].read().decode('utf-8') 
+            history = json.loads(history)
+            # print 'history', str(history)
+            
+            text += '\n======================='
+            text += '\nChanges in branch "' + history['branch'] + '":'
+            text += '\n======================='
+            for commit in history['commits']:
+              text += '\n-----------------------'
+              text += '\n- Url: ' + commit['url']
+              text += '\n- Author: ' + commit['author']
+              text += '\n- Commit message:'
+              text += '\n' + commit['message']
+              text += '\n-----------------------'
             return text
 
           def send_sns(topic, subject, message):
