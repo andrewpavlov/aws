@@ -341,38 +341,36 @@ Resources:
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
-              if not re.search('autoscaling', event['source']):
-                type = event['detail-type']
-                if not re.search('EC2 Instance', type):
-                  return 'skipped'
-                print '[INF] Event:', type
-                
-                detail = event['detail']
-                group = detail['AutoScalingGroupName']
-                response = auto_scaling.describe_tags(
-                  Filters=[{
-                    'Name': 'auto-scaling-group',
-                    'Values': [group]
-                  }, {
-                    'Name': 'key',
-                    'Values': ['codepipeline-job-id']
-                  }],
-                )
-                if len(response['Tags']) == 0:
-                  print '[INF] Not our group. Skipped.'
-                  return 'skipped'
-                
-                tag = response['Tags'][0]
-                jobid = tag['Value']
-                print '[INFO]', 'JobID', jobid
-                response = auto_scaling.delete_tags(
-                  Tags=[tag],
-                )
 
-                if re.search(' Successful', type):
-                  put_job_success(jobid, type)
-                else:
-                  put_job_failure(jobid, type)
+              type = event['detail-type']
+              print '[INF] Event:', type
+              
+              detail = event['detail']
+              group = detail['AutoScalingGroupName']
+              response = auto_scaling.describe_tags(
+                Filters=[{
+                  'Name': 'auto-scaling-group',
+                  'Values': [group]
+                }, {
+                  'Name': 'key',
+                  'Values': ['codepipeline-job-id']
+                }],
+              )
+              if len(response['Tags']) == 0:
+                print '[INF] Not our group. Skipped.'
+                return 'skipped'
+              
+              tag = response['Tags'][0]
+              jobid = tag['Value']
+              print '[INFO]', 'JobID', jobid
+              response = auto_scaling.delete_tags(
+                Tags=[tag],
+              )
+
+              if re.search(' Successful', type):
+                put_job_success(jobid, type)
+              else:
+                put_job_failure(jobid, type)
 
             except Exception as e:
               print('Failed due to exception.') 
