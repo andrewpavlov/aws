@@ -196,7 +196,7 @@ Resources:
           buffer_duration = 5000
           log_stream_name = {instance_id}
           initial_position = start_of_file
-          log_group_name = ${Project}
+          log_group_name = ${AWS::StackName}
           " > awslogs.conf
           python ./awslogs-agent-setup.py --region=${AWS::Region} -n --configfile=awslogs.conf
 

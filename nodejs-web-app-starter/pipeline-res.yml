@@ -302,7 +302,8 @@ Resources:
               - codepipeline:PutJobSuccessResult
               - sns:Publish
               Resource: "*"
-  EventLambda:
+
+  GenericEventLambda:
     Type: AWS::Lambda::Function
     Properties:
       Handler: index.lambda_handler
@@ -311,7 +312,23 @@ Resources:
       Role: !GetAtt EventLambdaRole.Arn
       Code:
         ZipFile: !Sub |
-          import json
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          def lambda_handler(event, context):
+            print 'INPUT:', event
+
+  AutoScalingEventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
           import re
           import boto3
           import botocore
@@ -319,11 +336,10 @@ Resources:
 
           code_pipeline = boto3.client('codepipeline')
           auto_scaling = boto3.client('autoscaling')
-          sns = boto3.client('sns')
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
-              if re.search('autoscaling', event['source']):
+              if not re.search('autoscaling', event['source']):
                 type = event['detail-type']
                 if not re.search('EC2 Instance', type):
                   return 'skipped'
@@ -355,11 +371,43 @@ Resources:
                   put_job_success(jobid, type)
                 else:
                   put_job_failure(jobid, type)
-              # elif re.search('codebuild', event['source']):
-              #   detail = event['detail']
-              # elif re.search('codedeploy', event['source']):
-              #   detail = event['detail']
-              elif re.search('codepipeline', event['source']):
+
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+  CodePipelineEventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          sns = boto3.client('sns')
+          def lambda_handler(event, context):
+            try:
+              print 'INPUT:', event
+              if re.search('codepipeline', event['source']):
                 detail = event['detail']
                 status = detail['state']
                 if status == 'FAILED':
@@ -386,27 +434,31 @@ Resources:
               print(e)
               traceback.print_exc()
 
-          def put_job_success(job, message):
-            print('Putting job success')
-            print(message)
-            code_pipeline.put_job_success_result(jobId=job)
-
-          def put_job_failure(job, message):
-            print('Putting job failure')
-            print(message)
-            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
-
           def get_pipeline_info_txt(event):
             detail = event['detail']
-            # response = client.get_pipeline_execution(
-            #     pipelineName=detail['pipeline'],
-            #     pipelineExecutionId=detail['execution-id']
-            # )
-            info = 'Status: ' + detail['state']
-            info += '\nTime: ' + event['time']
-            info += '\Arn: ' + event['resources'][0]
-            info += '\nExecution Id: ' + detail['execution-id']
-            return info
+            text = 'Status: ' + detail['state']
+            text += '\nTime: ' + event['time']
+            text += '\nArn: ' + event['resources'][0]
+            text += '\nExecution Id: ' + detail['execution-id']
+            response = code_pipeline.get_pipeline_state(
+              name=detail['pipeline']
+            )
+            for stage in response['stageStates']:
+              stageText = 'Stage Name: ' + stage['stageName']
+              latestExecution = ''
+              actionStates = stage['actionStates']
+              for state in actionStates:
+                if 'latestExecution' in state:
+                  latestExecution = state['latestExecution']
+                  stageText += '\n\tAction: ' + state['actionName']
+                  stageText += '\n\tStatus: ' + latestExecution['status']
+                  if 'summary' in latestExecution:
+                    stageText += '\n\tSummary: ' + latestExecution['summary']
+                  if 'errorDetails' in latestExecution:
+                    stageText += '\n\tError details: ' + str(latestExecution['errorDetails'])
+              if latestExecution:
+                text += '\n' + stageText
+            return text
 
           def send_sns(topic, subject, message):
             response = sns.publish(
@@ -432,14 +484,14 @@ Resources:
       State: "ENABLED"
       Targets:
         - 
-          Arn: !GetAtt EventLambda.Arn
+          Arn: !GetAtt AutoScalingEventLambda.Arn
           Id: "AutoScalingGroupRuleId"
 
   AutoScalingGroupRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
       FunctionName: 
-        Ref: EventLambda
+        Ref: AutoScalingEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt AutoScalingGroupRule.Arn
@@ -460,14 +512,14 @@ Resources:
       State: "ENABLED"
       Targets:
         - 
-          Arn: !GetAtt EventLambda.Arn
+          Arn: !GetAtt GenericEventLambda.Arn
           Id: "CodeBuildRuleId"
 
   CodeBuildRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
       FunctionName: 
-        Ref: EventLambda
+        Ref: GenericEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodeBuildRule.Arn
@@ -487,14 +539,14 @@ Resources:
       State: "ENABLED"
       Targets:
         - 
-          Arn: !GetAtt EventLambda.Arn
+          Arn: !GetAtt GenericEventLambda.Arn
           Id: "CodeDeployRuleId"
 
   CodeDeployRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
       FunctionName: 
-        Ref: EventLambda
+        Ref: GenericEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodeDeployRule.Arn
@@ -515,14 +567,14 @@ Resources:
       State: "ENABLED"
       Targets:
         - 
-          Arn: !GetAtt EventLambda.Arn
+          Arn: !GetAtt CodePipelineEventLambda.Arn
           Id: "CodePipelineRuleId"
 
   CodePipelineRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
       FunctionName: 
-        Ref: EventLambda
+        Ref: CodePipelineEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodePipelineRule.Arn
@@ -628,23 +680,22 @@ Resources:
           sns = boto3.client('sns')
           def lambda_handler(event, context):
             try:
-              if not 'CodePipeline.job' in event:
-                print 'EVENT:', event
-                return 'test'
-              job_id = event['CodePipeline.job']['id']
-              job_id_enc = encrypt_jobid(job_id)
-              job_data = event['CodePipeline.job']['data']
-              user_params = get_user_params(job_data)
-              artifact = find_artifact(job_data['inputArtifacts'], 'Source')
-
+              message = event['Records'][0]['Sns']['Message']
+              message = json.loads(message)
+              approval = message['approval']
+              url = get_url({
+                'pipelineName': approval['pipelineName'],
+                'stageName': approval['stageName'],
+                'actionName': approval['actionName'],
+                'token': approval['token'],
+              })
+              
               subject = 'New version of ${Project} is wating for approval'
-              url = 'https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/'
-              url += '${WebHookApiProdStage}/'
-              url += urllib.quote_plus(job_id_enc)
               emailMessage = 'Hey!'
-              if 'Url' in user_params:
-                emailMessage += '\nYou can try new version here\n' + user_params['Url']
-              emailMessage += '\nTo approve or reject new version goto\n' + url
+              emailMessage += '\n' + approval['customData']
+              emailMessage += '\nTo try goto\n' + approval['externalEntityLink']
+              emailMessage += '\nTo approve or reject goto\n' + url
+              emailMessage += '\nOr use AWS console\n' + approval['approvalReviewLink']
               json_message = {
                 'default': 'To approve/reject new version click ' + url,
                 'email': emailMessage,
@@ -654,18 +705,20 @@ Resources:
             except Exception as e:
               print('Failed due to exception.')
               print(e)
-              put_job_failure(job_id, 'Function exception: ' + str(e))
 
-          def encrypt_jobid(job_id):
-            response = kms.encrypt(KeyId='${KMS}', Plaintext=job_id)
+          def get_url(data):
+            data = json.dumps(data)
+            data = encrypt_string(data)
+            url = 'https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/'
+            url += '${WebHookApiProdStage}/'
+            url += urllib.quote_plus(data)
+            return url
+
+          def encrypt_string(what):
+            response = kms.encrypt(KeyId='${KMS}', Plaintext=what)
             binary_encrypted = response[u'CiphertextBlob']
             base64_encrypted = base64.b64encode(binary_encrypted)
             return base64_encrypted.decode()
-
-          def put_job_failure(job, message):
-            print('Putting job failure')
-            print(message)
-            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
 
           def send_sns(topic, subject, message):
             response = sns.publish(
@@ -675,22 +728,6 @@ Resources:
                 Message=message,
             )
             print 'SNS sent', response
-
-          def get_user_params(job_data):
-            try:
-              # Get the user parameters which contain the stack, artifact and file settings
-              user_parameters = job_data['actionConfiguration']['configuration']['UserParameters']
-              decoded_parameters = json.loads(user_parameters)
-            except Exception as e:
-              # We're expecting the user parameters to be encoded as JSON
-              raise Exception('UserParameters could not be decoded as JSON')
-            return decoded_parameters
-
-          def find_artifact(artifacts, name):
-            for artifact in artifacts:
-              if artifact['name'] == name:
-                return artifact
-            raise Exception('Input artifact named "{0}" not found in event'.format(name))
 
   WebHookLambdaRole:
     Type: AWS::IAM::Role
@@ -726,8 +763,7 @@ Resources:
                   - codepipeline:GetPipeline
                   - codepipeline:GetJobDetails
                   - codepipeline:GetPipelineState
-                  - codepipeline:PutJobFailureResult
-                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutApprovalResult
                 Resource: '*'
 
   WebHookLambda:
@@ -751,13 +787,10 @@ Resources:
           kms = boto3.client('kms')
           def lambda_handler(event, context):
             try:
-              job_id_encoded = event['pathParameters']['jobIdEncoded']
-              job_id_encoded = urllib.unquote_plus(job_id_encoded)
-              job_id=descrypt_jobid(job_id_encoded)
-              response = code_pipeline.get_job_details(
-                  jobId=job_id
-              )
-              print response
+              action_encoded = event['pathParameters']['actionEncoded']
+              action_encoded = urllib.unquote_plus(action_encoded)
+              action = descrypt_string(action_encoded)
+              stageInfo = json.loads(action)
 
               if not event['body']:
                 return {
@@ -796,9 +829,9 @@ Resources:
                 return {'statusCode': 401, 'body': 'Bad parameters'}
 
               if params['resolution'] == 'APPROVED':
-                put_job_success(job_id, params['message'])
+                put_approval_result(stageInfo, 'Approved', params['message'])
               elif params['resolution'] == 'REJECTED':
-                put_job_failure(job_id, params['message'])
+                put_approval_result(stageInfo, 'Rejected', params['message'])
               else:
                 return {'statusCode': 401, 'body': 'Bad parameters'}
 
@@ -808,21 +841,24 @@ Resources:
               print(e)
               return {'statusCode': 500, 'body': 'Error ecccorred ' + str(e)}
 
-          def descrypt_jobid(job_id):
-            binary_data = base64.b64decode(job_id)
+          def descrypt_string(what):
+            binary_data = base64.b64decode(what)
             meta = kms.decrypt(CiphertextBlob=binary_data)
             plaintext = meta[u'Plaintext']
             return plaintext.decode()
 
-          def put_job_success(job, message):
-            print('Putting job success')
-            print(message)
-            code_pipeline.put_job_success_result(jobId=job)
-
-          def put_job_failure(job, message):
-            print('Putting job failure')
-            print(message)
-            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+          def put_approval_result(info, status, message):
+            print 'Putting', status, message
+            code_pipeline.put_approval_result(
+              pipelineName=info['pipelineName'],
+              stageName=info['stageName'],
+              actionName=info['actionName'],
+              result={
+                'summary': message,
+                'status': status
+              },
+              token=info['token']
+            )
 
   WebHookRole:
     Type: 'AWS::IAM::Role'
@@ -863,7 +899,7 @@ Resources:
         schemes:
           - https
         paths:
-          /{jobIdEncoded}:
+          /{actionEncoded}:
             get:
               x-amazon-apigateway-integration:
                 responses:
@@ -1043,10 +1079,6 @@ Outputs:
     Value: !Ref DeploymentGroupProd
     Export:
       Name: !Sub ${Project}-deploygroup-prod
-  PipelineNotifyLambda:
-    Value: !Ref PipelineNotifyLambda
-    Export:
-      Name: !Sub ${Project}-notify-lambda
   PipelineApprovalInternalTopic:
     Value: !Ref PipelineApprovalInternalTopic
     Export:
