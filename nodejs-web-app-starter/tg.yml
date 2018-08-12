@@ -28,6 +28,7 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
+      Name: !Sub ${AWS::StackName}
       Protocol: HTTP
       Port: 80
       TargetType: instance
@@ -47,4 +48,4 @@ Outputs:
   TargetGroup:
     Value: !Ref TargetGroup
     Export:
-      Name: !Sub ${AWS::StackName}  
+      Name: !Sub ${AWS::StackName}
