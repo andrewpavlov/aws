@@ -99,7 +99,7 @@ done
 ```sh
 for stage in "dev" "qa" "prod"; do \
     aws cloudformation create-stack \
-    --stack-name $PROJECT_NAME-tg-$stage \
+    --stack-name $PROJECT_NAME-$stage-tg \
     --template-body file://nodejs-web-app-starter/tg.yml \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameters \
