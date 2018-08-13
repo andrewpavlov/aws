@@ -335,6 +335,7 @@ Resources:
       Role: !GetAtt EventLambdaRole.Arn
       Code:
         ZipFile: !Sub |
+          import json
           import re
           import boto3
           import botocore
@@ -343,6 +344,8 @@ Resources:
           code_pipeline = boto3.client('codepipeline')
           auto_scaling = boto3.client('autoscaling')
           elb = boto3.client('elbv2')
+          ec2 = boto3.client('ec2')
+          route53 = boto3.client('route53')
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
