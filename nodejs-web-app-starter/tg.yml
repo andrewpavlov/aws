@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Target group
+
+Parameters:
+  VpcId:
+    Description: >
+      The identifier of the virtual private cloud (VPC) for the target group.
+      The targets you register with this target group must use this VPC.
+    Type: String
+  HealthCheckPath:
+    Description: >
+      The destination path for health checks.
+      This path must begin with a '/' character,
+      and can be at most 1024 characters in length.
+    Type: String
+    Default: '/'
+  HealthCheckOptions:
+    Description: >
+      Healthy threshold (2),
+      Unhealthy threshold (2),
+      Timeout(5),
+      Interval (30),
+      Success codes (200)
+    Type: CommaDelimitedList
+    Default: '2,2,5,30,200'
+
+Resources:
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      VpcId: !Ref VpcId
+
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckPort: 80
+      HealthyThresholdCount: !Select [0, !Ref HealthCheckOptions]
+      UnhealthyThresholdCount: !Select [1, !Ref HealthCheckOptions]
+      HealthCheckTimeoutSeconds: !Select [2, !Ref HealthCheckOptions]
+      HealthCheckIntervalSeconds: !Select [3, !Ref HealthCheckOptions]
+      Matcher:
+        HttpCode: !Select [4, !Ref HealthCheckOptions]
+
+Outputs:
+  TargetGroup:
+    Value: !Ref TargetGroup
+    Export:
+      Name: !Sub ${AWS::StackName}

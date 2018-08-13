@@ -1,0 +1,1212 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Pipeline Resources
+
+Parameters:
+  Project:
+    Description: Project name
+    Type: String
+  KPUserArn:
+    Description: Key policy applied user ARN (arn:aws:iam::ACCOUNTID:root)
+    Type: String
+    Default: ''
+
+Conditions:
+  HasKPUserArn:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: KPUserArn
+      - ''
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-cbr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: '*'
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-cpr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteSubscriptionFilter
+                  - s3:*
+                  - sns:*
+                  - lambda:*
+                  - autoscaling:*
+                  - cloudformation:*
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:PassRole
+                Resource: '*'
+
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-dr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteSubscriptionFilter
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                  - codedeploy:Batch*
+                  - codedeploy:Get*
+                  - codedeploy:List*
+                  - s3:Get*
+                  - s3:List*
+                  - autoscaling:CompleteLifecycleAction
+                  - autoscaling:DeleteLifecycleHook
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeLifecycleHooks
+                  - autoscaling:PutLifecycleHook
+                  - autoscaling:RecordLifecycleActionHeartbeat
+                  - autoscaling:CreateAutoScalingGroup
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:EnableMetricsCollection
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribePolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:DescribeNotificationConfigurations
+                  - autoscaling:DescribeLifecycleHooks
+                  - autoscaling:SuspendProcesses
+                  - autoscaling:ResumeProcesses
+                  - autoscaling:AttachLoadBalancers
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledUpdateGroupAction
+                  - autoscaling:PutNotificationConfiguration
+                  - autoscaling:PutLifecycleHook
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DeleteAutoScalingGroup
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:TerminateInstances
+                  - tag:GetTags
+                  - tag:GetResources
+                  - sns:Publish
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:PutMetricAlarm
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeInstanceHealth
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: '*'
+
+  CodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Ref Project
+
+  DeploymentGroupDev:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Development
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-dev-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  DeploymentGroupQA:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Staging
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-qa-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  DeploymentGroupProd:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentGroupName: !Sub ${Project}-Production
+      ApplicationName: !Ref CodeDeployApp
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn
+      AutoRollbackConfiguration: 
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      AutoScalingGroups:
+        - Fn::ImportValue:
+            !Sub ${Project}-prod-as-group
+      DeploymentConfigName: CodeDeployDefault.OneAtATime      
+
+  PipelineNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Pipeline notification topic
+
+  PipelineApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Pipeline approval topic
+
+  PipelineApprovalInternalTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: Internal topic for pipeline stages Category=Approval
+      Subscription:
+        - Endpoint: !GetAtt PipelineNotifyLambda.Arn
+          Protocol: lambda
+
+  PipelineApprovalInternalTopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref PipelineApprovalInternalTopic
+      FunctionName: !GetAtt PipelineNotifyLambda.Arn
+
+  EventLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - 
+          PolicyName: !Sub "${AWS::StackName}-elr-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:FilterLogEvents
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:CreateOrUpdateTags
+              - autoscaling:DescribeTags
+              - autoscaling:DeleteTags
+              - elasticloadbalancing:RegisterTargets
+              - ec2:DescribeInstances
+              - route53:ListHostedZonesByName
+              - route53:ChangeResourceRecordSets
+              - codepipeline:GetPipeline
+              - codepipeline:GetJobDetails
+              - codepipeline:GetPipelineState
+              - codepipeline:GetPipelineExecution
+              - codepipeline:PutJobFailureResult
+              - codepipeline:PutJobSuccessResult
+              - s3:Get*
+              - sns:Publish
+              Resource: "*"
+
+  GenericEventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          def lambda_handler(event, context):
+            print 'INPUT:', event
+
+  AutoScalingEventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          auto_scaling = boto3.client('autoscaling')
+          elb = boto3.client('elbv2')
+          ec2 = boto3.client('ec2')
+          route53 = boto3.client('route53')
+          def lambda_handler(event, context):
+            try:
+              print 'INPUT:', event
+
+              type = event['detail-type']
+              print '[INF] Event:', type
+              
+              detail = event['detail']
+              group = detail['AutoScalingGroupName']
+              response = auto_scaling.describe_tags(
+                Filters=[{
+                  'Name': 'auto-scaling-group',
+                  'Values': [group]
+                }, {
+                  'Name': 'key',
+                  'Values': [
+                    'codepipeline-job-id',
+                    'target-group',
+                    'route53-record'
+                  ]
+                }],
+              )
+              if len(response['Tags']) == 0:
+                print '[INF] Not our group. Skipped.'
+                return 'skipped'
+              
+              tags = {}
+              for tag in response['Tags']:
+                if tag['Key'] == 'route53-record':
+                  tags[tag['Key']] = json.loads(tag['Value'])
+                else:
+                  tags[tag['Key']] = tag['Value']
+              print '[INF] Tags:', tags                  
+              
+              response = auto_scaling.delete_tags(
+                Tags=response['Tags'],
+              )
+              if re.search(' Successful', type):
+                if re.search(' Launch', type):
+                  if 'target-group' in tags:
+                    elb.register_targets(
+                      TargetGroupArn=tags['target-group'],
+                      Targets=[{
+                        'Id': detail['EC2InstanceId'],
+                      }]
+                    )
+                  if 'route53-record' in tags:
+                    info = tags['route53-record']
+                    add_53_record(info['zone'], info['record'], detail['EC2InstanceId']);
+
+                put_job_success(tags['codepipeline-job-id'], type)
+              else:
+                put_job_failure(tags['codepipeline-job-id'], type)
+
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+          def add_53_record(zone, record, instance_id):
+            response = ec2.describe_instances(InstanceIds = [instance_id])
+            dns = response['Reservations'][0]['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicDnsName']
+            response = route53.list_hosted_zones_by_name(
+              DNSName=zone
+            )
+            zone_id = response['HostedZones'][0]['Id']
+            print 'DNS', dns, 'ZoneId', zone_id
+            route53.change_resource_record_sets(
+              HostedZoneId=zone_id,
+              ChangeBatch={
+                'Comment': 'Update record to ec2 instance',
+                'Changes': [
+                  {
+                    'Action': 'UPSERT',
+                    'ResourceRecordSet': {
+                      'Name': record + '.' + zone,
+                      'Type': 'CNAME',
+                      'TTL': 300,
+                      'ResourceRecords': [
+                        {
+                          'Value': dns
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            )
+
+  CodePipelineEventLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt EventLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import re
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          sns = boto3.client('sns')
+          s3 = boto3.client('s3')
+          s3res = boto3.resource('s3')
+          def lambda_handler(event, context):
+            try:
+              print 'INPUT:', event
+              if re.search('codepipeline', event['source']):
+                detail = event['detail']
+                status = detail['state']
+                if status == 'FAILED':
+                  subject = '${Project} pipeline ' + detail['pipeline'] + ' has FAILED'
+                  message = get_pipeline_info_txt(event)
+                  json_message = {
+                    'default': message,
+                    'email': message,
+                    'sms': subject,
+                  }
+                  send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+                elif status == 'SUCCEEDED':
+                  subject = '${Project} pipeline ' + detail['pipeline'] + ' has SUCCEEDED'
+                  message = get_pipeline_info_txt(event)
+                  json_message = {
+                    'default': message,
+                    'email': message,
+                    'sms': subject,
+                  }
+                  send_sns('${PipelineNotificationTopic}', subject, json.dumps(json_message))
+
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+
+          def get_pipeline_info_txt(event):
+            detail = event['detail']
+            pipeline = detail['pipeline']
+            execution_id = detail['execution-id']
+            text = 'Status: ' + detail['state']
+            text += '\nTime: ' + event['time']
+            text += '\nArn: ' + event['resources'][0]
+            text += '\nExecution Id: ' + execution_id
+            response = code_pipeline.get_pipeline_state(
+              name=pipeline
+            )
+            for stage in response['stageStates']:
+              stageText = 'Stage Name: ' + stage['stageName']
+              latestExecution = ''
+              actionStates = stage['actionStates']
+              for state in actionStates:
+                if 'latestExecution' in state:
+                  latestExecution = state['latestExecution']
+                  stageText += '\n\tAction: ' + state['actionName']
+                  stageText += '\n\tStatus: ' + latestExecution['status']
+                  if 'summary' in latestExecution:
+                    stageText += '\n\tSummary: ' + latestExecution['summary']
+                  if 'errorDetails' in latestExecution:
+                    stageText += '\n\tError details: ' + str(latestExecution['errorDetails'])
+              if latestExecution:
+                text += '\n' + stageText
+            
+            response = code_pipeline.get_pipeline_execution(
+              pipelineName=pipeline,
+              pipelineExecutionId=execution_id
+            )
+            version = response['pipelineExecution']['artifactRevisions'][0]['revisionId']
+            # print 'execution', response
+            
+            response = code_pipeline.get_pipeline(
+              name=pipeline
+            )
+            # print 'get_pipeline', response
+            stages = response['pipeline']['stages']
+            configuration = stages[0]['actions'][0]['configuration']
+            
+            tags = s3.get_object_tagging(
+              Bucket=configuration['S3Bucket'],
+              Key=configuration['S3ObjectKey'],
+              VersionId=version
+            )
+            tags = tags['TagSet']
+            meta = {}
+            for tag in tags:
+              meta[tag['Key']] = tag['Value']
+            folder = configuration['S3ObjectKey'].replace('.zip', '')
+            key = folder + '/' + meta['reference']
+            # print key, meta['version']
+            
+            obj = s3res.Object(configuration['S3Bucket'], key)
+            history = obj.get(VersionId=meta['version'])['Body'].read().decode('utf-8') 
+            history = json.loads(history)
+            # print 'history', str(history)
+            
+            text += '\n======================='
+            text += '\nChanges in branch "' + history['branch'] + '":'
+            text += '\n======================='
+            for commit in history['commits']:
+              text += '\n-----------------------'
+              text += '\n- Url: ' + commit['url']
+              text += '\n- Author: ' + commit['author']
+              text += '\n- Commit message:'
+              text += '\n' + commit['message']
+              text += '\n-----------------------'
+            return text
+
+          def send_sns(topic, subject, message):
+            response = sns.publish(
+                TopicArn=topic,
+                Message=message,
+                Subject=subject,
+                MessageStructure='json',
+            )
+            print 'SNS sent', response
+
+  AutoScalingGroupRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance Launch Successful"
+          - "EC2 Instance Launch Unsuccessful"
+          - "EC2 Instance Terminate Successful"
+          - "EC2 Instance Terminate Unsuccessful"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt AutoScalingEventLambda.Arn
+          Id: "AutoScalingGroupRuleId"
+
+  AutoScalingGroupRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: AutoScalingEventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AutoScalingGroupRule.Arn
+
+  CodeBuildRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codebuild"
+        detail-type:
+          - "CodeBuild Build State Change"
+        detail:
+          build-status:
+            - "FAILED"
+            - "SUCCEEDED"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt GenericEventLambda.Arn
+          Id: "CodeBuildRuleId"
+
+  CodeBuildRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: GenericEventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodeBuildRule.Arn
+
+  CodeDeployRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codedeploy"
+        detail-type:
+          - "CodeDeploy Deployment State-change Notification"
+        detail:
+          state:
+            - "FAILURE"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt GenericEventLambda.Arn
+          Id: "CodeDeployRuleId"
+
+  CodeDeployRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: GenericEventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodeDeployRule.Arn
+
+  CodePipelineRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: String
+      EventPattern:
+        source:
+          - "aws.codepipeline"
+        detail-type:
+          - "CodePipeline Pipeline Execution State Change"
+        detail:
+          state:
+            - "FAILED"
+            - "SUCCEEDED"
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: !GetAtt CodePipelineEventLambda.Arn
+          Id: "CodePipelineRuleId"
+
+  CodePipelineRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: CodePipelineEventLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CodePipelineRule.Arn
+
+  KMS:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::If:
+                - HasKPUserArn
+                - Ref: KPUserArn
+                - Fn::Sub: arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt PipelineNotifyLambdaRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt WebHookLambdaRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: "*"
+
+  PipelineNotifyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-plr-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - sns:Publish
+                  - codepipeline:PutJobFailureResult
+                Resource: '*'
+
+  PipelineNotifyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      MemorySize: '128'
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt PipelineNotifyLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+          import base64
+          import urllib
+
+          code_pipeline = boto3.client('codepipeline')
+          kms = boto3.client('kms')
+          sns = boto3.client('sns')
+          def lambda_handler(event, context):
+            try:
+              message = event['Records'][0]['Sns']['Message']
+              message = json.loads(message)
+              approval = message['approval']
+              url = get_url({
+                'pipelineName': approval['pipelineName'],
+                'stageName': approval['stageName'],
+                'actionName': approval['actionName'],
+                'token': approval['token'],
+              })
+              
+              subject = 'New version of ${Project} is wating for approval'
+              emailMessage = 'Hey!'
+              emailMessage += '\n' + approval['customData']
+              emailMessage += '\nTo try goto\n' + approval['externalEntityLink']
+              emailMessage += '\nTo approve or reject goto\n' + url
+              emailMessage += '\nOr use AWS console\n' + approval['approvalReviewLink']
+              json_message = {
+                'default': 'To approve/reject new version click ' + url,
+                'email': emailMessage,
+                'sms': subject,
+              }
+              send_sns('${PipelineApprovalTopic}', subject, json.dumps(json_message))
+            except Exception as e:
+              print('Failed due to exception.')
+              print(e)
+
+          def get_url(data):
+            data = json.dumps(data)
+            data = encrypt_string(data)
+            url = 'https://${WebHookApi}.execute-api.${AWS::Region}.amazonaws.com/'
+            url += '${WebHookApiProdStage}/'
+            url += urllib.quote_plus(data)
+            return url
+
+          def encrypt_string(what):
+            response = kms.encrypt(KeyId='${KMS}', Plaintext=what)
+            binary_encrypted = response[u'CiphertextBlob']
+            base64_encrypted = base64.b64encode(binary_encrypted)
+            return base64_encrypted.decode()
+
+          def send_sns(topic, subject, message):
+            response = sns.publish(
+                TopicArn=topic,
+                Subject=subject,
+                MessageStructure='json',
+                Message=message,
+            )
+            print 'SNS sent', response
+
+  WebHookLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-whlr-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
+                  - iam:GetRole
+                  - sns:Publish
+                  - codepipeline:GetPipeline
+                  - codepipeline:GetJobDetails
+                  - codepipeline:GetPipelineState
+                  - codepipeline:PutApprovalResult
+                Resource: '*'
+
+  WebHookLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      MemorySize: '128'
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt WebHookLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+          import base64
+          import urllib
+
+          code_pipeline = boto3.client('codepipeline')
+          kms = boto3.client('kms')
+          def lambda_handler(event, context):
+            try:
+              action_encoded = event['pathParameters']['actionEncoded']
+              action_encoded = urllib.unquote_plus(action_encoded)
+              action = descrypt_string(action_encoded)
+              stageInfo = json.loads(action)
+
+              if not event['body']:
+                return {
+                  'statusCode': 200,
+                  'headers': {'Content-Type': 'text/html'},
+                  'body': ' \
+                  <html> \
+                    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"> \
+                    <body> \
+                      <form method=post encrypt="application/x-www-form-urlencoded"> \
+                        <div class="modal" tabindex="-1" role="dialog" style="display: block;"> \
+                          <div class="modal-dialog" role="document"> \
+                            <div class="modal-content"> \
+                              <div class="modal-header"> \
+                                <h5 class="modal-title">Resolution</h5> \
+                              </div> \
+                              <div class="modal-body"> \
+                                <div class="form-group"> \
+                                  <textarea class="form-control" name="message" rows="3" required></textarea> \
+                                </div> \
+                              </div> \
+                              <div class="modal-footer"> \
+                                <button type="submit" name="resolution" value="REJECTED" class="btn btn-danger">Reject</button> \
+                                <button type="submit" name="resolution" value="APPROVED" class="btn btn-primary">Approve</button> \
+                              </div> \
+                            </div> \
+                          </div> \
+                        </div> \
+                      </form> \
+                    </body> \
+                  </html> \
+                '}
+
+              params = {x[0] : urllib.unquote_plus(x[1]).decode('utf8') for x in [x.split("=") for x in event['body'].split("&") ]}
+              if not params['message'] or not params['resolution']:
+                return {'statusCode': 401, 'body': 'Bad parameters'}
+
+              if params['resolution'] == 'APPROVED':
+                put_approval_result(stageInfo, 'Approved', params['message'])
+              elif params['resolution'] == 'REJECTED':
+                put_approval_result(stageInfo, 'Rejected', params['message'])
+              else:
+                return {'statusCode': 401, 'body': 'Bad parameters'}
+
+              return {'statusCode': 200, 'body': params['resolution']}
+            except Exception as e:
+              print('Failed due to exception.')
+              print(e)
+              return {'statusCode': 500, 'body': 'Error ecccorred ' + str(e)}
+
+          def descrypt_string(what):
+            binary_data = base64.b64decode(what)
+            meta = kms.decrypt(CiphertextBlob=binary_data)
+            plaintext = meta[u'Plaintext']
+            return plaintext.decode()
+
+          def put_approval_result(info, status, message):
+            print 'Putting', status, message
+            code_pipeline.put_approval_result(
+              pipelineName=info['pipelineName'],
+              stageName=info['stageName'],
+              actionName=info['actionName'],
+              result={
+                'summary': message,
+                'status': status
+              },
+              token=info['token']
+            )
+
+  WebHookRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - >-
+          arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-whr-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeAsync'
+                  - 'lambda:InvokeFunction'
+                Resource:
+                  - !GetAtt WebHookLambda.Arn
+
+  WebHookApi:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      Description: !Sub ${Project} pipeline api
+      Body:
+        swagger: '2.0'
+        info:
+          version: '1.0'
+          title: !Ref 'AWS::StackName'
+        schemes:
+          - https
+        paths:
+          /{actionEncoded}:
+            get:
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                uri: !Join
+                  - ''
+                  - - 'arn:aws:apigateway:'
+                    - !Ref 'AWS::Region'
+                    - ':lambda:path/2015-03-31/functions/'
+                    - !GetAtt WebHookLambda.Arn
+                    - /invocations
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                credentials: !GetAtt WebHookRole.Arn
+                type: aws_proxy
+            post:
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                uri: !Join
+                  - ''
+                  - - 'arn:aws:apigateway:'
+                    - !Ref 'AWS::Region'
+                    - ':lambda:path/2015-03-31/functions/'
+                    - !GetAtt WebHookLambda.Arn
+                    - /invocations
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                credentials: !GetAtt WebHookRole.Arn
+                type: aws_proxy
+
+  WebHookApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref WebHookApi
+
+  WebHookApiProdStage:
+    Type: 'AWS::ApiGateway::Stage'
+    Properties:
+      DeploymentId: !Ref WebHookApiDeployment
+      RestApiId: !Ref WebHookApi
+      StageName: v1
+
+  ASConfLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - 
+          PolicyName: !Sub "${AWS::StackName}-asl-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:FilterLogEvents
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:CreateOrUpdateTags
+              - autoscaling:DescribeTags
+              - codepipeline:PutJobFailureResult
+              - codepipeline:PutJobSuccessResult
+              Resource: "*"
+  ASConfLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt ASConfLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+          import traceback
+
+          code_pipeline = boto3.client('codepipeline')
+          auto_scaling = boto3.client('autoscaling')
+          def lambda_handler(event, context):
+            try:
+              job_id = event['CodePipeline.job']['id']
+              job_data = event['CodePipeline.job']['data']
+              params = get_user_params(job_data)
+
+              response = auto_scaling.describe_auto_scaling_groups(
+                AutoScalingGroupNames=[
+                  params['AutoScalingGroupName'],
+                ],
+              )
+
+              group = response['AutoScalingGroups'][0]
+              capacity = -1
+              if params['Action'] == 'stop':
+                if group['DesiredCapacity'] > 0:
+                  capacity = 0
+              else:
+                if group['DesiredCapacity'] == 0:
+                  capacity = 1
+
+              if capacity > -1:
+                print('change desired capacity')
+                tags = [{
+                    'ResourceId': params['AutoScalingGroupName'],
+                    'ResourceType': 'auto-scaling-group',
+                    'Key': 'codepipeline-job-id',
+                    'Value': job_id,
+                    'PropagateAtLaunch': False
+                }]
+                if capacity > 0:
+                  if 'TargetGroup' in params:
+                    tags.append({
+                      'ResourceId': params['AutoScalingGroupName'],
+                      'ResourceType': 'auto-scaling-group',
+                      'Key': 'target-group',
+                      'Value': params['TargetGroup'],
+                      'PropagateAtLaunch': False
+                    })
+                  if 'Route53' in params:
+                    tags.append({
+                      'ResourceId': params['AutoScalingGroupName'],
+                      'ResourceType': 'auto-scaling-group',
+                      'Key': 'route53-record',
+                      'Value': json.dumps(params['Route53']),
+                      'PropagateAtLaunch': False
+                    })
+                auto_scaling.create_or_update_tags(
+                  Tags=tags
+                )
+                auto_scaling.set_desired_capacity(
+                  AutoScalingGroupName=params['AutoScalingGroupName'],
+                  DesiredCapacity=capacity,
+                  HonorCooldown=True,
+                )
+              else:
+                put_job_success(job_id, 'Nothing to change')
+
+            except Exception as e:
+              print('Failed due to exception.') 
+              print(e)
+              traceback.print_exc()
+              put_job_failure(job_id, 'Function exception: ' + str(e))
+
+          def get_user_params(job_data):
+            user_parameters = job_data['actionConfiguration']['configuration']['UserParameters']
+            return json.loads(user_parameters)
+
+          def put_job_success(job, message):
+            print('Putting job success')
+            print(message)
+            code_pipeline.put_job_success_result(jobId=job)
+
+          def put_job_failure(job, message):
+            print('Putting job failure')
+            print(message)
+            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+
+Outputs:
+  CodeBuildRole:
+    Value: !GetAtt CodeBuildRole.Arn
+    Export:
+      Name: !Sub ${Project}-codebuild-role
+  CodePipelineRole:
+    Value: !GetAtt CodePipelineRole.Arn
+    Export:
+      Name: !Sub ${Project}-codepipeline-role
+  CodeDeployApp:
+    Value: !Ref CodeDeployApp
+    Export:
+      Name: !Sub ${Project}-deploy-app
+  DeploymentGroupDev:
+    Value: !Ref DeploymentGroupDev
+    Export:
+      Name: !Sub ${Project}-deploygroup-dev
+  DeploymentGroupQA:
+    Value: !Ref DeploymentGroupQA
+    Export:
+      Name: !Sub ${Project}-deploygroup-qa
+  DeploymentGroupProd:
+    Value: !Ref DeploymentGroupProd
+    Export:
+      Name: !Sub ${Project}-deploygroup-prod
+  PipelineApprovalInternalTopic:
+    Value: !Ref PipelineApprovalInternalTopic
+    Export:
+      Name: !Sub ${Project}-approval-i-topic
+  ASConfLambda:
+    Value: !Ref ASConfLambda
+    Export:
+      Name: !Sub ${Project}-asconf-lambda
