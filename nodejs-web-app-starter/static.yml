@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 resources
+
+Parameters:
+  Project:
+    Description: Project name
+    Type: String
+
+Resources:
+  PublicBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - 
+            Event: s3:ObjectCreated:*
+            Function:
+              Fn::ImportValue:
+                !Sub ${Project}-invalidation-lambda
+          - 
+            Event: s3:ObjectRemoved:*
+            Function:
+              Fn::ImportValue:
+                !Sub ${Project}-invalidation-lambda
+
+  PublicBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: PublicBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - s3:GetObject
+            Effect: Allow
+            Resource: !Sub arn:aws:s3:::${PublicBucket}/*
+            Principal: "*"

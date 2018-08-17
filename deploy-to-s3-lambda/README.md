@@ -1,7 +1,7 @@
 
 set parameters
 
-```
+```sh
 export DEPLOY_LAMBDA_BUCKET_NAME=bucket-name
 export AWS_PROFILE=my-aws-profile
 export AWS_REGION=us-east-1

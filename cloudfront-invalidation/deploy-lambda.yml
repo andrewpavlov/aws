@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: CloudFront Invalidation S3 Lambda
+
 Resources:
   InvalidationLambdaRole:
     Type: AWS::IAM::Role
@@ -14,6 +15,7 @@ Resources:
           Action:
           - sts:AssumeRole
       Path: "/"
+
   InvalidationLambdaPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -33,6 +35,7 @@ Resources:
           Resource: "*"
       Roles:
       - Ref: InvalidationLambdaRole
+
   InvalidationLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -130,6 +133,7 @@ Resources:
         Fn::GetAtt:
         - InvalidationLambdaRole
         - Arn
+
   InvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -141,11 +145,9 @@ Resources:
       Principal: s3.amazonaws.com
       SourceAccount:
         Ref: AWS::AccountId
+
 Outputs:
   InvalidationLambda:
-    Value:
-      Fn::GetAtt: 
-        - "InvalidationLambda"
-        - "Arn"
+    Value: !GetAtt InvalidationLambda.Arn
     Export:
-      Name: !Sub "${AWS::StackName}-invalidation-lambda"
+      Name: !Sub ${AWS::StackName}

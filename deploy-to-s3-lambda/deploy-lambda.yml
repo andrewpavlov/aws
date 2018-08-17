@@ -25,7 +25,7 @@ Resources:
       Objects:
         - deploy-to-s3.zip
 
-  DeployToS3LambdaRole:
+  LambdaRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -58,7 +58,7 @@ Resources:
                   - 'codepipeline:PutJobFailureResult'
                 Resource: '*'
 
-  DeployToS3Lambda:
+  Lambda:
     Type: AWS::Lambda::Function
     DependsOn: CopyLambdaZips
     Properties:
@@ -66,7 +66,7 @@ Resources:
       Runtime: python2.7
       MemorySize: 128
       Timeout: 60
-      Role: !GetAtt DeployToS3LambdaRole.Arn
+      Role: !GetAtt LambdaRole.Arn
       Code:
         S3Bucket: !Ref LambdaZipsBucket
         S3Key: !Sub ${LambdaKeyPrefix}deploy-to-s3.zip
@@ -164,6 +164,6 @@ Resources:
                   cfnresponse.send(event, context, status, {}, None)
 Outputs:
   OutputBucketName:
-    Value: !Ref DeployToS3Lambda
+    Value: !Ref Lambda
     Export:
       Name: !Sub ${AWS::StackName}

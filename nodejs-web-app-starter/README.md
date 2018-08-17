@@ -13,7 +13,7 @@ Set of stacks for web application based on
 
 ## Set properties
 
-```
+```sh
 export AWS_PROFILE=my-account-name
 export AWS_REGION=us-east-1
 export PROJECT_NAME=my-project
@@ -101,6 +101,21 @@ for stage in "dev" "qa" "prod"; do \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameters \
     ParameterKey=VpcId,ParameterValue=$PROJECT_VPC \
+    --profile $AWS_PROFILE \
+    --region $AWS_REGION; \
+done
+```
+
+## Create resources for static content (client-side tpl web-app)
+
+```sh
+for stage in "dev" "qa" "prod"; do \
+    aws cloudformation create-stack \
+    --stack-name $PROJECT_NAME-$stage-static \
+    --template-body file://nodejs-web-app-starter/static.yml \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameters \
+    ParameterKey=Project,ParameterValue=$PROJECT_NAME \
     --profile $AWS_PROFILE \
     --region $AWS_REGION; \
 done
