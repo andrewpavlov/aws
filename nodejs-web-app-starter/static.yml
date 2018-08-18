@@ -37,3 +37,9 @@ Resources:
             Effect: Allow
             Resource: !Sub arn:aws:s3:::${PublicBucket}/*
             Principal: "*"
+
+Outputs:
+  PublicBucket:
+    Value: !Ref PublicBucket
+    Export:
+      Name: !Sub ${AWS::StackName}
