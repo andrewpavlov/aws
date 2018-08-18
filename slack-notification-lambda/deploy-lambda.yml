@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Web service
+Description: SNS to Slack notification lambda
 
 Parameters:
   WebHook:
