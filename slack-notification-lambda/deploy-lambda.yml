@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Web service
+
+Parameters:
+  WebHook:
+    Description: Slack hook
+    Type: String
+  Channel:
+    Description: Slack channel
+    Type: String
+  Username:
+    Description: Username for message
+    Type: String
+    Default: 'AWS SNS'
+  Icon:
+    Description: Username for message
+    Type: String
+    Default: ':speech_ballon:'
+
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-lambda-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+  Lambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Send SNS message to slack
+      Handler: index.handler
+      Runtime: nodejs6.10
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: !Sub | 
+          const https = require('https');
+          const util = require('util');
+
+          exports.handler = (event, context) => {
+            let subject = event.Records[0].Sns.Subject;
+            let message = event.Records[0].Sns.Message;
+            
+            console.log('SNS', subject, message);
+
+            let color = '#2d9ee0';
+            const severity = {
+              danger: [
+                'FAILED'
+              ],
+              good: [
+                'SUCCEEDED'
+              ]
+            };
+            for (let level in severity) {
+              if (severity.hasOwnProperty(level)) {
+                let found = severity[level].filter(s => {
+                  return message.indexOf(s) > -1;
+                }).length;
+                if (found) {
+                  color = level;
+                  break;
+                }
+              }
+            }
+
+            const postData = {
+              channel: '${Channel}',
+              username: '${Username}',
+              text: '*' + subject + '*',
+              icon_emoji: '${Icon}',
+              attachments: [{
+                color: color,
+                text: message
+              }]
+            };
+
+            const options = {
+              method: 'POST',
+              hostname: 'hooks.slack.com',
+              port: 443,
+              path: '${WebHook}'
+            };
+
+            let req = https.request(options, res => {
+              res.setEncoding('utf8');
+              res.on('data', chunk => {
+                context.done(null);
+              });
+            });
+            req.on('error', e => {
+              console.log('problem with request: ' + e.message);
+            });
+            req.write(util.format('%j', postData));
+            req.end();
+          };
+
+Outputs:
+  Lambda:
+    Value: !Ref Lambda
+    Export:
+      Name: !Sub ${AWS::StackName}
