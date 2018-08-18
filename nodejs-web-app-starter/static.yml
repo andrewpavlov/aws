@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: EC2 resources
+Description: Public buckets for static content
 
 Parameters:
   Project:
