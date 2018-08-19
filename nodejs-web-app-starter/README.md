@@ -19,6 +19,7 @@ export AWS_REGION=us-east-1
 export PROJECT_NAME=my-project
 export EC2_KEYPAIR=keypair
 export PROJECT_VPC=my-vpc
+export TG_HEALTHCHECK_PATH=/
 ```
 
 ## Create EC2 resources (like security group)
@@ -101,6 +102,7 @@ for stage in "dev" "qa" "prod"; do \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameters \
     ParameterKey=VpcId,ParameterValue=$PROJECT_VPC \
+    ParameterKey=HealthCheckPath,ParameterValue=$TG_HEALTHCHECK_PATH \
     --profile $AWS_PROFILE \
     --region $AWS_REGION; \
 done
