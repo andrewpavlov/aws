@@ -368,21 +368,18 @@ Resources:
                   ]
                 }],
               )
-              if len(response['Tags']) == 0:
-                print '[INF] Not our group. Skipped.'
-                return 'skipped'
-              
+
               tags = {}
               for tag in response['Tags']:
                 if tag['Key'] == 'route53-record':
                   tags[tag['Key']] = json.loads(tag['Value'])
                 else:
                   tags[tag['Key']] = tag['Value']
-              print '[INF] Tags:', tags                  
-              
-              response = auto_scaling.delete_tags(
-                Tags=response['Tags'],
-              )
+                if tag['Key'] == 'codepipeline-job-id':
+                  response = auto_scaling.delete_tags(
+                    Tags=[tag],
+                  )
+
               if re.search(' Successful', type):
                 if re.search(' Launch', type):
                   if 'target-group' in tags:
@@ -396,8 +393,9 @@ Resources:
                     info = tags['route53-record']
                     add_53_record(info['zone'], info['record'], detail['EC2InstanceId']);
 
-                put_job_success(tags['codepipeline-job-id'], type)
-              else:
+                if 'codepipeline-job-id' in tags:
+                  put_job_success(tags['codepipeline-job-id'], type)
+              elif 'codepipeline-job-id' in tags:
                 put_job_failure(tags['codepipeline-job-id'], type)
 
             except Exception as e:
@@ -1136,7 +1134,7 @@ Resources:
                       'ResourceType': 'auto-scaling-group',
                       'Key': 'target-group',
                       'Value': params['TargetGroup'],
-                      'PropagateAtLaunch': False
+                      'PropagateAtLaunch': True
                     })
                   if 'Route53' in params:
                     tags.append({
@@ -1144,7 +1142,7 @@ Resources:
                       'ResourceType': 'auto-scaling-group',
                       'Key': 'route53-record',
                       'Value': json.dumps(params['Route53']),
-                      'PropagateAtLaunch': False
+                      'PropagateAtLaunch': True
                     })
                 auto_scaling.create_or_update_tags(
                   Tags=tags
