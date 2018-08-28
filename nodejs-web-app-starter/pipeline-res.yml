@@ -1084,16 +1084,17 @@ Resources:
           import boto3
           import botocore
 
-          lambda = boto3.client('lambda')
+          client = boto3.client('lambda')
           def lambda_handler(event, context):
             params=event
             if isinstance(params, str):
               params=json.loads(params)
-            return lambda.invoke(
+            client.invoke(
               FunctionName=params['FunctionName'],
               InvocationType='Event',
-              Payload=json.dumps(params['Payload'])
+              Payload=bytes(json.dumps(params['Payload']).encode('utf-8'))
             )
+            return 'Done'
 
   LambdaDelayMachineRole:
     Type: AWS::IAM::Role
@@ -1167,6 +1168,7 @@ Resources:
               - logs:PutLogEvents
               - logs:FilterLogEvents
               - states:ListExecutions
+              - states:DescribeExecution
               - states:StartExecution
               - states:StopExecution
               - autoscaling:DescribeAutoScalingInstances
@@ -1196,6 +1198,7 @@ Resources:
             c_p=boto3.client('codepipeline')
             a_s=boto3.client('autoscaling')
             s_f=boto3.client('stepfunctions')
+            _lmN='${LambdaDelayMachine}'
             def lambda_handler(event, context):
               try:
                 # read parameters
@@ -1209,7 +1212,7 @@ Resources:
                 rN=params['AutoScalingGroupName']
                 unschedule(rN)
                 # get as group
-                r=a_s.describe_a_s_groups(
+                r=a_s.describe_auto_scaling_groups(
                   AutoScalingGroupNames=[
                     params['AutoScalingGroupName'],
                   ],
@@ -1288,25 +1291,29 @@ Resources:
               delay=params['Delay']
               del params['Delay']
               s_f.start_execution(
-                stateMachineArn='${LambdaDelayMachine}',
-                name=job,
+                stateMachineArn=_lmN,
                 input=json.dumps({
-                  'FucntionName': arn,
+                  'Id': job,
+                  'FunctionName': arn,
                   'Delay': delay,
                   'Payload': params
                 })
               )
             def unschedule(job):
               r=s_f.list_executions(
-                stateMachineArn='${LambdaDelayMachine}',
+                stateMachineArn=_lmN,
                 statusFilter='RUNNING'
               )
-              e=list(filter(lambda x: x['name']==job,r['executions']))
-              if len(e):
-                print 'Stop execution'
-                s_f.stop_execution(
-                  executionArn=e[0]['executionArn']
+              for e in r['executions']:
+                re=s_f.describe_execution(
+                  executionArn=e['executionArn']
                 )
+                i=json.loads(re['input'])
+                if i['Id'] == job:
+                  print 'Stop execution'
+                  s_f.stop_execution(
+                    executionArn=e['executionArn']
+                  )
             def get_user_params(job_data):
               user_parameters=job_data['actionConfiguration']['configuration']['UserParameters']
               return json.loads(user_parameters)
