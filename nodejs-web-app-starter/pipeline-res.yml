@@ -1,4 +1,3 @@
-
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Pipeline Resources
 
@@ -260,10 +259,10 @@ Resources:
   PipelineApprovalInternalTopicPermission:
     Type: AWS::Lambda::Permission
     Properties:
+      FunctionName: !GetAtt PipelineNotifyLambda.Arn
       Action: lambda:InvokeFunction
       Principal: sns.amazonaws.com
       SourceArn: !Ref PipelineApprovalInternalTopic
-      FunctionName: !GetAtt PipelineNotifyLambda.Arn
 
   EventLambdaRole:
     Type: AWS::IAM::Role
@@ -593,8 +592,7 @@ Resources:
   AutoScalingGroupRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: 
-        Ref: AutoScalingEventLambda
+      FunctionName: !Ref AutoScalingEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt AutoScalingGroupRule.Arn
@@ -621,8 +619,7 @@ Resources:
   CodeBuildRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: 
-        Ref: GenericEventLambda
+      FunctionName: !Ref GenericEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodeBuildRule.Arn
@@ -648,8 +645,7 @@ Resources:
   CodeDeployRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: 
-        Ref: GenericEventLambda
+      FunctionName: !Ref GenericEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodeDeployRule.Arn
@@ -676,8 +672,7 @@ Resources:
   CodePipelineRulePermissions:
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: 
-        Ref: CodePipelineEventLambda
+      FunctionName: !Ref CodePipelineEventLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CodePipelineRule.Arn
@@ -744,7 +739,7 @@ Resources:
       Path: '/'
       Policies:
         -
-          PolicyName: !Sub "${AWS::StackName}-plr-policy"
+          PolicyName: !Sub "${AWS::StackName}-pnlr-policy"
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -984,8 +979,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - 'lambda:InvokeAsync'
-                  - 'lambda:InvokeFunction'
+                  - lambda:InvokeAsync
+                  - lambda:InvokeFunction
                 Resource:
                   - !GetAtt WebHookLambda.Arn
 
@@ -1048,6 +1043,105 @@ Resources:
       RestApiId: !Ref WebHookApi
       StageName: v1
 
+  StepFunctionLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - 
+          PolicyName: !Sub "${AWS::StackName}-sflr-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - lambda:InvokeAsync
+              - lambda:InvokeFunction
+              Resource: "*"
+
+  StepFunctionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt StepFunctionLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+
+          client = boto3.client('lambda')
+          def lambda_handler(event, context):
+            params=event
+            if isinstance(params, str):
+              params=json.loads(params)
+            client.invoke(
+              FunctionName=params['FunctionName'],
+              InvocationType='Event',
+              Payload=bytes(json.dumps(params['Payload']).encode('utf-8'))
+            )
+            return 'Done'
+
+  LambdaDelayMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-ldmr-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  LambdaDelayMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString: !Sub
+        - |-
+          {
+            "Comment": "Delayed lambda running",
+            "StartAt": "Wait",
+            "States": {
+              "Wait": {
+                "Type": "Wait",
+                "SecondsPath": "$.Delay",
+                "Next": "Lambda"
+              },
+              "Lambda": {
+                "Type": "Task",
+                "Resource": "${LambdaArn}",
+                "End": true
+              }
+            }
+          }
+        - {LambdaArn: !GetAtt StepFunctionLambda.Arn}
+      RoleArn: !GetAtt LambdaDelayMachineRole.Arn
+
   ASConfLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1063,7 +1157,7 @@ Resources:
       Path: "/"
       Policies:
         - 
-          PolicyName: !Sub "${AWS::StackName}-asl-policy"
+          PolicyName: !Sub "${AWS::StackName}-asclr-policy"
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -1073,6 +1167,10 @@ Resources:
               - logs:CreateLogStream
               - logs:PutLogEvents
               - logs:FilterLogEvents
+              - states:ListExecutions
+              - states:DescribeExecution
+              - states:StartExecution
+              - states:StopExecution
               - autoscaling:DescribeAutoScalingInstances
               - autoscaling:SetDesiredCapacity
               - autoscaling:DescribeAutoScalingGroups
@@ -1081,6 +1179,7 @@ Resources:
               - codepipeline:PutJobFailureResult
               - codepipeline:PutJobSuccessResult
               Resource: "*"
+
   ASConfLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -1089,91 +1188,142 @@ Resources:
       Timeout: 30
       Role: !GetAtt ASConfLambdaRole.Arn
       Code:
-        ZipFile: !Sub |
-          import json
-          import boto3
-          import botocore
-          import traceback
+        ZipFile: !Sub
+          - |
+            import json
+            import boto3
+            import botocore
+            import traceback
 
-          code_pipeline = boto3.client('codepipeline')
-          auto_scaling = boto3.client('autoscaling')
-          def lambda_handler(event, context):
-            try:
-              job_id = event['CodePipeline.job']['id']
-              job_data = event['CodePipeline.job']['data']
-              params = get_user_params(job_data)
+            c_p=boto3.client('codepipeline')
+            a_s=boto3.client('autoscaling')
+            s_f=boto3.client('stepfunctions')
+            _lmN='${LambdaDelayMachine}'
+            def lambda_handler(event, context):
+              try:
+                # read parameters
+                params=event
+                if 'CodePipeline.job' in event:
+                  job_id=event['CodePipeline.job']['id']
+                  params=get_user_params(event['CodePipeline.job']['data'])
+                  params['job_id']=job_id
+                print 'Params', params
+                # remove scheduled task if exists
+                rN=params['AutoScalingGroupName']
+                unschedule(rN)
+                # get as group
+                r=a_s.describe_auto_scaling_groups(
+                  AutoScalingGroupNames=[
+                    params['AutoScalingGroupName'],
+                  ],
+                )
+                group=r['AutoScalingGroups'][0]
+                # check if current capacity does not match requested
+                capacity=-1
+                if params['Action'] == 'stop':
+                  if group['DesiredCapacity'] > 0:
+                    capacity=0
+                else:
+                  # run instance if needed
+                  if group['DesiredCapacity'] == 0:
+                    capacity=1              
+                if capacity > -1:
+                  # change
+                  # collect tags
+                  tags=[]
+                  if 'Tags' in params:
+                    tags=params['Tags']
+                  if 'job_id' in params:
+                    tags.append({
+                        'ResourceId':params['AutoScalingGroupName'],
+                        'ResourceType':'auto-scaling-group',
+                        'Key':'codepipeline-job-id',
+                        'Value':params['job_id'],
+                        'PropagateAtLaunch':False
+                    })
+                  if capacity > 0:
+                    if 'TargetGroup' in params:
+                      tags.append({
+                        'ResourceId':params['AutoScalingGroupName'],
+                        'ResourceType':'auto-scaling-group',
+                        'Key':'target-group',
+                        'Value':params['TargetGroup'],
+                        'PropagateAtLaunch':True
+                      })
+                    if 'Route53' in params:
+                      tags.append({
+                        'ResourceId':params['AutoScalingGroupName'],
+                        'ResourceType':'auto-scaling-group',
+                        'Key':'route53-record',
+                        'Value':json.dumps(params['Route53']),
+                        'PropagateAtLaunch':True
+                      })
 
-              response = auto_scaling.describe_auto_scaling_groups(
-                AutoScalingGroupNames=[
-                  params['AutoScalingGroupName'],
-                ],
+                  # change
+                  if 'Delay' in params:
+                    schedule(rN, context.invoked_function_arn, params)
+                  else:
+                    print 'change now', capacity
+                    # set tags
+                    if len(tags):
+                      a_s.create_or_update_tags(
+                        Tags=tags
+                      )
+                    # change capacity
+                    a_s.set_desired_capacity(
+                      AutoScalingGroupName=params['AutoScalingGroupName'],
+                      DesiredCapacity=capacity,
+                      HonorCooldown=True,
+                    )
+                else:
+                  # nothing to change
+                  if 'job_id' in params:
+                    put_job_success(params['job_id'], 'Nothing to change')
+              except Exception as e:
+                print 'Failed due to exception.'
+                print(e)
+                traceback.print_exc()
+                # stop pipeline
+                if 'job_id' in params:
+                  put_job_failure(job_id, 'Function exception:' + str(e))
+
+            def schedule(job, arn, params):
+              delay=params['Delay']
+              del params['Delay']
+              s_f.start_execution(
+                stateMachineArn=_lmN,
+                input=json.dumps({
+                  'Id': job,
+                  'FunctionName': arn,
+                  'Delay': delay,
+                  'Payload': params
+                })
               )
-
-              group = response['AutoScalingGroups'][0]
-              capacity = -1
-              if params['Action'] == 'stop':
-                if group['DesiredCapacity'] > 0:
-                  capacity = 0
-              else:
-                if group['DesiredCapacity'] == 0:
-                  capacity = 1
-
-              if capacity > -1:
-                print('change desired capacity')
-                tags = [{
-                    'ResourceId': params['AutoScalingGroupName'],
-                    'ResourceType': 'auto-scaling-group',
-                    'Key': 'codepipeline-job-id',
-                    'Value': job_id,
-                    'PropagateAtLaunch': False
-                }]
-                if capacity > 0:
-                  if 'TargetGroup' in params:
-                    tags.append({
-                      'ResourceId': params['AutoScalingGroupName'],
-                      'ResourceType': 'auto-scaling-group',
-                      'Key': 'target-group',
-                      'Value': params['TargetGroup'],
-                      'PropagateAtLaunch': True
-                    })
-                  if 'Route53' in params:
-                    tags.append({
-                      'ResourceId': params['AutoScalingGroupName'],
-                      'ResourceType': 'auto-scaling-group',
-                      'Key': 'route53-record',
-                      'Value': json.dumps(params['Route53']),
-                      'PropagateAtLaunch': True
-                    })
-                auto_scaling.create_or_update_tags(
-                  Tags=tags
+            def unschedule(job):
+              r=s_f.list_executions(
+                stateMachineArn=_lmN,
+                statusFilter='RUNNING'
+              )
+              for e in r['executions']:
+                re=s_f.describe_execution(
+                  executionArn=e['executionArn']
                 )
-                auto_scaling.set_desired_capacity(
-                  AutoScalingGroupName=params['AutoScalingGroupName'],
-                  DesiredCapacity=capacity,
-                  HonorCooldown=True,
-                )
-              else:
-                put_job_success(job_id, 'Nothing to change')
-
-            except Exception as e:
-              print('Failed due to exception.') 
-              print(e)
-              traceback.print_exc()
-              put_job_failure(job_id, 'Function exception: ' + str(e))
-
-          def get_user_params(job_data):
-            user_parameters = job_data['actionConfiguration']['configuration']['UserParameters']
-            return json.loads(user_parameters)
-
-          def put_job_success(job, message):
-            print('Putting job success')
-            print(message)
-            code_pipeline.put_job_success_result(jobId=job)
-
-          def put_job_failure(job, message):
-            print('Putting job failure')
-            print(message)
-            code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+                i=json.loads(re['input'])
+                if i['Id'] == job:
+                  print 'Stop execution'
+                  s_f.stop_execution(
+                    executionArn=e['executionArn']
+                  )
+            def get_user_params(job_data):
+              user_parameters=job_data['actionConfiguration']['configuration']['UserParameters']
+              return json.loads(user_parameters)
+            def put_job_success(job, msg):
+              print 'Putting job success', msg
+              c_p.put_job_success_result(jobId=job)
+            def put_job_failure(job, msg):
+              print 'Putting job failure', msg
+              c_p.put_job_failure_result(jobId=job, failureDetails={'message':msg, 'type':'JobFailed'})
+          - {LambdaDelayMachine: !Ref LambdaDelayMachine}
 
 Outputs:
   CodeBuildRole:
