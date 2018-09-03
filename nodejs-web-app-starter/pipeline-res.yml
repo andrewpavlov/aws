@@ -1382,6 +1382,8 @@ Resources:
                   # change
                   if 'Delay' in params:
                     schedule(rN, context.invoked_function_arn, params)
+                    if 'job_id' in params:
+                      put_job_success(params['job_id'], 'Scheduled')
                   else:
                     print 'change now', capacity
                     # set tags
