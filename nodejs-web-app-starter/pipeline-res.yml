@@ -264,6 +264,158 @@ Resources:
       Principal: sns.amazonaws.com
       SourceArn: !Ref PipelineApprovalInternalTopic
 
+  GetPiplineLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-pnlr-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - codepipeline:Get*
+                  - s3:Get*
+                Resource: '*'
+
+  GetPiplineLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      MemorySize: '128'
+      Runtime: python2.7
+      Timeout: 30
+      Role: !GetAtt GetPiplineLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import botocore
+
+          code_pipeline = boto3.client('codepipeline')
+          s3 = boto3.client('s3')
+          s3res = boto3.resource('s3')
+          def lambda_handler(event, context):
+            pipeline = event['pipeline']
+            execution_id = None
+            if 'execution-id' in event:
+              execution_id = event['execution-id']
+            token = None
+            if 'token' in event:
+              token = event['token']
+            retText = False
+            if 'ret' in event and event['ret'] == 'text':
+              retText = True
+
+            r = code_pipeline.get_pipeline_state(
+              name=pipeline
+            )
+            ret = {
+              'Name': pipeline,
+              'Stages': []
+            }
+            for s in r['stageStates']:
+              if not 'latestExecution' in s:
+                continue
+              stage = {
+                'Name': s['stageName'],
+                'Actions': []
+              }
+              sle = s['latestExecution']
+              for a in s['actionStates']:
+                if not 'latestExecution' in a:
+                  continue
+                ale = a['latestExecution']
+                action = {
+                  'Name': a['actionName'],
+                  'Status': ale['status']
+                }
+                if 'summary' in ale:
+                  action['Details'] = ale['summary']
+                if 'errorDetails' in ale:
+                  action['Details'] = str(ale['errorDetails'])
+                stage['Actions'].append(action)
+                if not execution_id and token and 'token' in ale and ale['token'] == token:
+                  execution_id = sle['pipelineExecutionId']
+              ret['Stages'].append(stage)
+              if sle['status'] != 'Succeeded':
+                break
+            
+            if execution_id:
+              r = code_pipeline.get_pipeline_execution(
+                pipelineName=pipeline,
+                pipelineExecutionId=execution_id
+              )
+              version = r['pipelineExecution']['artifactRevisions'][0]['revisionId']
+              # print 'execution', r
+              
+              r = code_pipeline.get_pipeline(
+                name=pipeline
+              )
+              # print 'get_pipeline', r
+              stages = r['pipeline']['stages']
+              configuration = stages[0]['actions'][0]['configuration']
+              
+              tags = s3.get_object_tagging(
+                Bucket=configuration['S3Bucket'],
+                Key=configuration['S3ObjectKey'],
+                VersionId=version
+              )
+              tags = tags['TagSet']
+              meta = {}
+              for tag in tags:
+                meta[tag['Key']] = tag['Value']
+              folder = configuration['S3ObjectKey'].replace('.zip', '')
+              key = folder + '/' + meta['reference']
+              # print key, meta['version']
+              
+              obj = s3res.Object(configuration['S3Bucket'], key)
+              history = obj.get(VersionId=meta['version'])['Body'].read().decode('utf-8') 
+              history = json.loads(history)
+              # print 'history', str(history)
+              ret['History'] = history
+
+            if retText:
+              text = 'Pipeline: ' + ret['Name']
+              if execution_id:
+                text += '\nExecutionID: ' + execution_id
+              for s in ret['Stages']:
+                text += '\n' + s['Name']
+                for a in s['Actions']:
+                  text += '\n\tAction: ' + a['Name']
+                  text += '\n\tStatus: ' + a['Status']
+                  if 'Details' in a:
+                    text += '\n\tDetails: ' + a['Details']
+              if 'History' in ret:
+                history = ret['History']
+                text += '\n\n-----------------------'
+                text += '\nChanges in branch "' + history['branch'] + '":'
+                for commit in history['commits']:
+                  text += '\n-----------------------'
+                  text += '\n[Url]: ' + commit['url']
+                  text += '\n[Author]: ' + commit['author']
+                  text += '\n[Commit message]:'
+                  text += '\n' + commit['message']
+              ret = text
+
+            return ret
+
   EventLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -306,6 +458,8 @@ Resources:
               - codepipeline:PutJobSuccessResult
               - s3:Get*
               - sns:Publish
+              - lambda:InvokeAsync
+              - lambda:InvokeFunction
               Resource: "*"
 
   GenericEventLambda:
@@ -459,8 +613,7 @@ Resources:
 
           code_pipeline = boto3.client('codepipeline')
           sns = boto3.client('sns')
-          s3 = boto3.client('s3')
-          s3res = boto3.resource('s3')
+          lc = boto3.client('lambda')
           def lambda_handler(event, context):
             try:
               print 'INPUT:', event
@@ -495,71 +648,21 @@ Resources:
             detail = event['detail']
             pipeline = detail['pipeline']
             execution_id = detail['execution-id']
+
             text = 'Status: ' + detail['state']
             text += '\nTime: ' + event['time']
-            text += '\nArn: ' + event['resources'][0]
-            text += '\nExecution Id: ' + execution_id
-            response = code_pipeline.get_pipeline_state(
-              name=pipeline
+
+            info = lc.invoke(
+              FunctionName='${GetPiplineLambda}',
+              InvocationType='RequestResponse',
+              Payload=bytes(json.dumps({
+                'pipeline': pipeline,
+                'execution-id': execution_id,
+                'ret': 'text'
+              }).encode('utf-8'))
             )
-            for stage in response['stageStates']:
-              stageText = 'Stage Name: ' + stage['stageName']
-              latestExecution = ''
-              actionStates = stage['actionStates']
-              for state in actionStates:
-                if 'latestExecution' in state:
-                  latestExecution = state['latestExecution']
-                  stageText += '\n\tAction: ' + state['actionName']
-                  stageText += '\n\tStatus: ' + latestExecution['status']
-                  if 'summary' in latestExecution:
-                    stageText += '\n\tSummary: ' + latestExecution['summary']
-                  if 'errorDetails' in latestExecution:
-                    stageText += '\n\tError details: ' + str(latestExecution['errorDetails'])
-              if latestExecution:
-                text += '\n' + stageText
-            
-            response = code_pipeline.get_pipeline_execution(
-              pipelineName=pipeline,
-              pipelineExecutionId=execution_id
-            )
-            version = response['pipelineExecution']['artifactRevisions'][0]['revisionId']
-            # print 'execution', response
-            
-            response = code_pipeline.get_pipeline(
-              name=pipeline
-            )
-            # print 'get_pipeline', response
-            stages = response['pipeline']['stages']
-            configuration = stages[0]['actions'][0]['configuration']
-            
-            tags = s3.get_object_tagging(
-              Bucket=configuration['S3Bucket'],
-              Key=configuration['S3ObjectKey'],
-              VersionId=version
-            )
-            tags = tags['TagSet']
-            meta = {}
-            for tag in tags:
-              meta[tag['Key']] = tag['Value']
-            folder = configuration['S3ObjectKey'].replace('.zip', '')
-            key = folder + '/' + meta['reference']
-            # print key, meta['version']
-            
-            obj = s3res.Object(configuration['S3Bucket'], key)
-            history = obj.get(VersionId=meta['version'])['Body'].read().decode('utf-8') 
-            history = json.loads(history)
-            # print 'history', str(history)
-            
-            text += '\n======================='
-            text += '\nChanges in branch "' + history['branch'] + '":'
-            text += '\n======================='
-            for commit in history['commits']:
-              text += '\n-----------------------'
-              text += '\n- Url: ' + commit['url']
-              text += '\n- Author: ' + commit['author']
-              text += '\n- Commit message:'
-              text += '\n' + commit['message']
-              text += '\n-----------------------'
+            text += '\n' + json.loads(info['Payload'].read())
+
             return text
 
           def send_sns(topic, subject, message):
@@ -754,6 +857,8 @@ Resources:
                   - logs:PutRetentionPolicy
                   - sns:Publish
                   - codepipeline:PutJobFailureResult
+                  - lambda:InvokeAsync
+                  - lambda:InvokeFunction
                 Resource: '*'
 
   PipelineNotifyLambda:
@@ -776,6 +881,7 @@ Resources:
           code_pipeline = boto3.client('codepipeline')
           kms = boto3.client('kms')
           sns = boto3.client('sns')
+          lc = boto3.client('lambda')
           def lambda_handler(event, context):
             try:
               message = event['Records'][0]['Sns']['Message']
@@ -788,9 +894,11 @@ Resources:
                 'token': approval['token'],
               })
               
-              subject = 'New version of ${Project} is wating for approval'
+              subject = '[${Project}]: New version is wating for approval'
               emailMessage = 'Hey!'
               emailMessage += '\n' + approval['customData']
+              emailMessage += '\n\n' + get_pipeline_info_txt(approval['pipelineName'], approval['token'])
+              emailMessage += '\n\n--'
               emailMessage += '\nTo try goto\n' + approval['externalEntityLink']
               emailMessage += '\nTo approve or reject goto\n' + url
               emailMessage += '\nOr use AWS console\n' + approval['approvalReviewLink']
@@ -811,6 +919,18 @@ Resources:
             url += '${WebHookApiProdStage}/'
             url += urllib.quote_plus(data)
             return url
+
+          def get_pipeline_info_txt(pipeline, token):
+            r = lc.invoke(
+              FunctionName='${GetPiplineLambda}',
+              InvocationType='RequestResponse',
+              Payload=bytes(json.dumps({
+                'pipeline': pipeline,
+                'token': token,
+                'ret': 'text'
+              }).encode('utf-8'))
+            )
+            return json.loads(r['Payload'].read())
 
           def encrypt_string(what):
             response = kms.encrypt(KeyId='${KMS}', Plaintext=what)
