@@ -108,7 +108,7 @@ for stage in "dev" "qa" "prod"; do \
 done
 ```
 
-## Create resources for static content (client-side tpl web-app)
+## Create resources for static content (client-side tpl web-app) if needed
 
 ```sh
 for stage in "dev" "qa" "prod"; do \
@@ -129,6 +129,19 @@ done
 aws cloudformation create-stack \
 --stack-name $PROJECT_NAME-pipeline-res \
 --template-body file://nodejs-web-app-starter/pipeline-res.yml \
+--capabilities CAPABILITY_NAMED_IAM \
+--parameters \
+ParameterKey=Project,ParameterValue=$PROJECT_NAME \
+--profile $AWS_PROFILE \
+--region $AWS_REGION
+```
+
+## Create pipeline resources for ec2 based project if needed
+
+```sh
+aws cloudformation create-stack \
+--stack-name $PROJECT_NAME-pipeline-ec2-res \
+--template-body file://nodejs-web-app-starter/pipeline-ec2-res.yml \
 --capabilities CAPABILITY_NAMED_IAM \
 --parameters \
 ParameterKey=Project,ParameterValue=$PROJECT_NAME \
