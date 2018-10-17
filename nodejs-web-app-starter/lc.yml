@@ -8,12 +8,16 @@ Parameters:
   KeyPair:
     Description: Key pair for access to EC2 by SSH
     Type: String
+  ImageId:
+    Description: AWS EC2 Image ID (ami-da05a4a0)
+    Type: String
+    Default: ami-da05a4a0
 
 Resources:
   UbuntuNode:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      ImageId: ami-da05a4a0
+      ImageId: !Ref ImageId
       IamInstanceProfile:
         Fn::ImportValue:
           !Sub ${Project}-ec2-res-ip
