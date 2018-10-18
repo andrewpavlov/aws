@@ -19,6 +19,7 @@ export AWS_REGION=us-east-1
 export PROJECT_NAME=my-project
 export EC2_KEYPAIR=keypair
 export EC2_IMAGEID=ami-da05a4a0
+export EC2_INSTANCETYPE=t2.micro
 export PROJECT_VPC=my-vpc
 export TG_HEALTHCHECK_PATH=/
 ```
@@ -48,6 +49,7 @@ for stage in "dev" "qa" "prod"; do \
     ParameterKey=Project,ParameterValue=$PROJECT_NAME \
     ParameterKey=KeyPair,ParameterValue=$EC2_KEYPAIR \
     ParameterKey=ImageId,ParameterValue=$EC2_IMAGEID \
+    ParameterKey=InstanceType,ParameterValue=$EC2_INSTANCETYPE \
     --profile $AWS_PROFILE \
     --region $AWS_REGION; \
 done

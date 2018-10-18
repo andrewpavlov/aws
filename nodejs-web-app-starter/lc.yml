@@ -12,6 +12,10 @@ Parameters:
     Description: AWS EC2 Image ID (ami-da05a4a0)
     Type: String
     Default: ami-da05a4a0
+  InstanceType:
+    Description: AWS EC2 Instance typpe (t2.micro)
+    Type: String
+    Default: t2.micro
 
 Resources:
   UbuntuNode:
@@ -24,7 +28,7 @@ Resources:
       SecurityGroups:
         - Fn::ImportValue:
             !Sub ${Project}-ec2-res-sg
-      InstanceType: t2.micro
+      InstanceType: !Ref InstanceType
       KeyName: 
         Ref: KeyPair
       UserData:
