@@ -6,6 +6,18 @@ Parameters:
     Description: Auto-scaling group options [desired, min, max]
     Type: CommaDelimitedList
     Default: '1,1,1'
+  LC:
+    Description: Launch configuration
+    Type: String
+    Default: ''
+
+Conditions:
+  HasLC:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: LC
+      - ''
+
 Resources:
   Group:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -21,10 +33,13 @@ Resources:
         Value: !Sub ${AWS::StackName}
         PropagateAtLaunch: true
       LaunchConfigurationName:
-        Fn::ImportValue:
-          !Sub ${AWS::StackName}-lc
+        Fn::If:
+        - HasLC
+        - Ref: LC
+        - Fn::ImportValue: !Sub ${AWS::StackName}-lc
       TerminationPolicies:
         - OldestInstance
+
 Outputs:
   Group:
     Value: !Ref Group

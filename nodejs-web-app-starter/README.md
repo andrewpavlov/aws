@@ -96,6 +96,22 @@ for stage in "dev" "qa" "prod"; do \
 done
 ```
 
+## To unlink EC2 stack (previously created) from LaunchConfiguration stack
+
+```sh
+export EC2_LC=.... (output value from launch configuration stack)
+export stage=... (dev/qa/prod)
+aws cloudformation update-stack \
+--stack-name $PROJECT_NAME-$stage \
+--template-body file://nodejs-web-app-starter/as.yml \
+--capabilities CAPABILITY_NAMED_IAM \
+--parameters \
+'ParameterKey=ASOptions,ParameterValue="0,0,1"' \
+ParameterKey=LC,ParameterValue=$EC2_LC \
+--profile $AWS_PROFILE \
+--region $AWS_REGION; \
+```
+
 ## Create Target Groups for Appliation Load Balancer (dev/qa/prod)
 
 ```sh
