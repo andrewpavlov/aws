@@ -109,7 +109,7 @@ aws cloudformation update-stack \
 'ParameterKey=ASOptions,ParameterValue="0,0,1"' \
 ParameterKey=LC,ParameterValue=$EC2_LC \
 --profile $AWS_PROFILE \
---region $AWS_REGION; \
+--region $AWS_REGION;
 ```
 
 ## Create Target Groups for Appliation Load Balancer (dev/qa/prod)
