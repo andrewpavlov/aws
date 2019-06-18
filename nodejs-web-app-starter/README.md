@@ -143,7 +143,7 @@ for stage in "dev" "qa" "prod"; do \
 done
 ```
 
-* - [Invalidation lambda](https://github.com/andrewpavlov/aws/tree/master/cloudfront-invalidation) should be installed
+\* - [Invalidation lambda](https://github.com/andrewpavlov/aws/tree/master/cloudfront-invalidation) should be installed
 
 ## Create pipeline resources
 
