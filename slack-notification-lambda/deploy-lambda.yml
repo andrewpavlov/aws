@@ -52,7 +52,7 @@ Resources:
     Properties:
       Description: Send SNS message to slack
       Handler: index.handler
-      Runtime: nodejs6.10
+      Runtime: nodejs8.10
       Role: !GetAtt LambdaRole.Arn
       Timeout: 30
       Code:
