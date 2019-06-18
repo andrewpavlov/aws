@@ -128,7 +128,7 @@ for stage in "dev" "qa" "prod"; do \
 done
 ```
 
-## Create resources for static content (client-side tpl web-app) if needed
+## Create resources for static content (client-side tpl web-app) if needed*
 
 ```sh
 for stage in "dev" "qa" "prod"; do \
@@ -142,6 +142,8 @@ for stage in "dev" "qa" "prod"; do \
     --region $AWS_REGION; \
 done
 ```
+
+* - [Invalidation lambda](https://github.com/andrewpavlov/aws/tree/master/cloudfront-invalidation) should be installed
 
 ## Create pipeline resources
 
